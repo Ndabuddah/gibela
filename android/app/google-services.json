@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "865618939896",
+    "project_id": "ride-51be6",
+    "storage_bucket": "ride-51be6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:865618939896:android:def4a82295c8482b7c100d",
+        "android_client_info": {
+          "package_name": "com.example.gibelbibela"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAl460a9RVG5IaAsgjTJA_bkUHTfkjqCVc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:865618939896:android:d63bca75974faed77c100d",
+        "android_client_info": {
+          "package_name": "com.example.rideapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAl460a9RVG5IaAsgjTJA_bkUHTfkjqCVc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:865618939896:android:bb4fdb535845618a7c100d",
+        "android_client_info": {
+          "package_name": "com.rideapp.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAl460a9RVG5IaAsgjTJA_bkUHTfkjqCVc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
