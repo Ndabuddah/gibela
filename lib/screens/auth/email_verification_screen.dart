@@ -80,13 +80,19 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     if (mounted) {
       setState(() => _isVerified = true);
 
-      // Add a small delay to show the success message
-      await Future.delayed(const Duration(milliseconds: 1500));
-
-      if (!mounted) return;
-
       try {
-        if (_isDriver) {
+        // Double check the user's role from the database
+        final dbService = Provider.of<DatabaseService>(context, listen: false);
+        final userModel = await dbService.getUserById(widget.user.uid);
+        
+        // Add a small delay to show the success message
+        await Future.delayed(const Duration(milliseconds: 1500));
+
+        if (!mounted) return;
+
+        // Navigate based on user role from database
+        if (userModel?.isDriver == true) {
+          print('📱 Navigating to driver registration...');
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
               builder: (_) => const DriverSignupScreen(),
@@ -94,6 +100,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
             ),
           );
         } else {
+          print('📱 Navigating to passenger registration...');
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
               builder: (_) => const PassengerRegistrationScreen(),

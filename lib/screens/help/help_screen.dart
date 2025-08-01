@@ -115,19 +115,7 @@ class HelpScreen extends StatelessWidget {
                               }
                             },
                           ),
-                          _iconSupportButton(
-                            icon: Icons.phone,
-                            color: Colors.orange,
-                            label: 'Call',
-                            onTap: () async {
-                              const phoneUrl = 'tel:+27687455976';
-                              if (await canLaunch(phoneUrl)) {
-                                await launch(phoneUrl);
-                              } else {
-                                _showError(context, 'Could not make a call.');
-                              }
-                            },
-                          ),
+
                         ],
                       ),
                       const SizedBox(height: 32),

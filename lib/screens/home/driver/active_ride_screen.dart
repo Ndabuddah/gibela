@@ -251,22 +251,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
     );
   }
 
-  Future<void> _callPassenger() async {
-    if (_passenger?.phoneNumber == null) return;
-
-    final Uri phoneUri = Uri(
-      scheme: 'tel',
-      path: _passenger!.phoneNumber,
-    );
-
-    if (await canLaunchUrl(phoneUri)) {
-      await launchUrl(phoneUri);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not launch dialer')),
-      );
-    }
-  }
+  // Call functionality removed
 
   // Navigation to pickup location
   // Navigation to pickup location - UPDATED TO USE DRIVER'S LOCATION AS START
@@ -527,15 +512,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
                 },
               ),
             ],
-            _buildCommunicationButton(
-              icon: Icons.call_rounded,
-              label: 'Call',
-              onPressed: () {
-                if (_passenger?.phoneNumber != null) {
-                  launchUrl(Uri.parse('tel:${_passenger!.phoneNumber}'));
-                }
-              },
-            ),
+
           ],
         ),
       ],

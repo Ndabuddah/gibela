@@ -133,10 +133,31 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
 
       // Check if registration is complete based on user type
       if (userModel.isDriver) {
-        // For drivers, check if they have completed driver signup
-        // (This would need to be determined based on your driver model structure)
-        final destination = const DriverHomeScreen();
-        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => destination));
+        // For drivers, check if they have completed driver registration
+        final databaseService = Provider.of<DatabaseService>(context, listen: false);
+        final driverModel = await databaseService.getDriverByUserId(user.uid);
+        
+        // If no driver profile exists or required fields are missing, send to driver registration
+        if (driverModel == null || 
+            driverModel.idNumber.isEmpty || 
+            driverModel.documents.isEmpty ||
+            driverModel.vehicleType == null ||
+            driverModel.licensePlate == null) {
+          print('🚗 Driver registration incomplete, redirecting to registration...');
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => const DriverSignupScreen(),
+            ),
+          );
+        } else {
+          // Driver registration is complete, go to home screen
+          print('✅ Driver registration complete, going to home screen...');
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => const DriverHomeScreen(),
+            ),
+          );
+        }
       } else {
         // For passengers, check if they have completed registration
         // Check for the isRegistered flag that was set in passenger registration

@@ -379,13 +379,6 @@ class _RideProgressScreenState extends State<RideProgressScreen>
     );
   }
 
-  void _contactDriver() {
-    // TODO: Implement contact driver functionality
-    ModernSnackBar.show(
-      context,
-      message: 'Contact driver feature coming soon!',
-    );
-  }
 
   void _openChat() async {
     if (_currentRide?.driverId == null) {
@@ -669,14 +662,7 @@ class _RideProgressScreenState extends State<RideProgressScreen>
                                         ],
                                       ),
                                     ),
-                                    IconButton(
-                                      onPressed: _contactDriver,
-                                      icon: const Icon(
-                                        Icons.phone,
-                                        color: AppColors.black,
-                                        size: 24,
-                                      ),
-                                    ),
+
                                   ],
                                 ),
                               ],
@@ -720,15 +706,7 @@ class _RideProgressScreenState extends State<RideProgressScreen>
                                 isDark: isDark,
                               ),
                             ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: _ActionButton(
-                                icon: Icons.phone,
-                                text: 'Call',
-                                onPressed: _contactDriver,
-                                isDark: isDark,
-                              ),
-                            ),
+
                             const SizedBox(width: 16),
                             Expanded(
                               child: _ActionButton(

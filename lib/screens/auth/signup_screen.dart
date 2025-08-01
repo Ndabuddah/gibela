@@ -149,20 +149,20 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
 
           // Create UserModel for passenger
           print('👤 Creating UserModel...');
-          final passengerUserModel = UserModel(
+          final userModel = UserModel(
             uid: user.uid,
             email: _emailController.text.trim(),
             name: _fullNameController.text.trim(),
             phoneNumber: _phoneController.text.trim(),
-            isDriver: false,
-            isApproved: true,
+            isDriver: _selectedRole == 'driver',
+            isApproved: _selectedRole != 'driver', // Only passengers are auto-approved
             surname: _surnameController.text.trim(),
           );
-          print('✅ UserModel created: ${passengerUserModel.name}');
+          print('✅ UserModel created: ${userModel.name}');
 
           // Save passenger details to Firestore
           print('💾 Saving user to Firestore...');
-          await Provider.of<DatabaseService>(context, listen: false).createUser(passengerUserModel);
+          await Provider.of<DatabaseService>(context, listen: false).createUser(userModel);
           print('✅ User saved to Firestore');
 
           if (!mounted) {
