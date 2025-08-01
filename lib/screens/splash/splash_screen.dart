@@ -11,6 +11,7 @@ import '../../widgets/common/modern_loading_indicator.dart';
 import '../auth/email_verification_screen.dart';
 import '../auth/passenger_registration_screen.dart';
 import '../home/driver/driver_home_screen.dart';
+import '../auth/driver_signup_screen.dart';
 import '../home/passenger/passenger_home_screen.dart';
 import '../onboarding/onboarding_screen.dart';
 
@@ -142,7 +143,21 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
             driverModel.idNumber.isEmpty || 
             driverModel.documents.isEmpty ||
             driverModel.vehicleType == null ||
-            driverModel.licensePlate == null) {
+            driverModel.vehicleModel == null ||
+            driverModel.vehicleColor == null ||
+            driverModel.licensePlate == null ||
+            driverModel.towns.isEmpty ||
+            !driverModel.isApproved) {
+          print('🚗 Driver registration status:');
+          print('- Driver model exists: ${driverModel != null}');
+          print('- ID Number: ${driverModel?.idNumber.isNotEmpty}');
+          print('- Documents: ${driverModel?.documents.isNotEmpty}');
+          print('- Vehicle Type: ${driverModel?.vehicleType != null}');
+          print('- Vehicle Model: ${driverModel?.vehicleModel != null}');
+          print('- Vehicle Color: ${driverModel?.vehicleColor != null}');
+          print('- License Plate: ${driverModel?.licensePlate != null}');
+          print('- Towns: ${driverModel?.towns.isNotEmpty}');
+          print('- Approved: ${driverModel?.isApproved}');
           print('🚗 Driver registration incomplete, redirecting to registration...');
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(

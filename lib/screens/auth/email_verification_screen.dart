@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:gibelbibela/screens/auth/signup_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../services/database_service.dart';
 
 import '../../constants/app_colors.dart';
 import '../../widgets/common/modern_alert_dialog.dart';
@@ -80,18 +82,14 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     if (mounted) {
       setState(() => _isVerified = true);
 
+      // Add a small delay to show the success message
+      await Future.delayed(const Duration(milliseconds: 1500));
+
+      if (!mounted) return;
+
       try {
-        // Double check the user's role from the database
-        final dbService = Provider.of<DatabaseService>(context, listen: false);
-        final userModel = await dbService.getUserById(widget.user.uid);
-        
-        // Add a small delay to show the success message
-        await Future.delayed(const Duration(milliseconds: 1500));
-
-        if (!mounted) return;
-
-        // Navigate based on user role from database
-        if (userModel?.isDriver == true) {
+        // Check if they're a driver from the widget parameter
+        if (_isDriver) {
           print('📱 Navigating to driver registration...');
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(

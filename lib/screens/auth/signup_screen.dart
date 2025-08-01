@@ -175,7 +175,7 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
             MaterialPageRoute(
               builder: (_) => EmailVerificationScreen(
                 user: user,
-                isDriver: false,
+                isDriver: _selectedRole == 'driver',  // Pass the selected role
               ),
             ),
           );
