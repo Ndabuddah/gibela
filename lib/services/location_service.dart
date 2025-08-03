@@ -6,10 +6,12 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
 import '../constants/app_constants.dart';
+import 'address_cache_service.dart';
 // Removed: import 'mapbox_service.dart';
 
 class LocationService extends ChangeNotifier {
   Position? _currentPosition;
+  final AddressCacheService _addressCache = AddressCacheService();
 
   LocationService() {
     _getCurrentLocation();
@@ -90,14 +92,36 @@ class LocationService extends ChangeNotifier {
 
   Future<String?> getAddressFromCoordinates(double lat, double lng) async {
     try {
-      List<Placemark> placemarks = await placemarkFromCoordinates(lat, lng);
-      if (placemarks.isNotEmpty) {
-        final place = placemarks.first;
-        return '${place.street}, ${place.subLocality}, ${place.locality}';
+      // Use cached address service for better performance
+      final address = await _addressCache.getAddressFromCoordinates(lat, lng);
+      if (address != null) {
+        return address;
       }
-      return null;
+      
+      // Fallback to coordinates if address lookup fails
+      return AddressCacheService.getCoordinatesDisplay(lat, lng);
     } catch (e) {
-      return null;
+      // Return coordinates as fallback
+      return AddressCacheService.getCoordinatesDisplay(lat, lng);
     }
+  }
+
+  // Get coordinates as primary identifier (fast, no network calls)
+  String getCoordinatesDisplay(double lat, double lng) {
+    return AddressCacheService.getCoordinatesDisplay(lat, lng);
+  }
+
+  // Check if coordinates are valid
+  bool isValidCoordinates(double lat, double lng) {
+    return AddressCacheService.isValidCoordinates(lat, lng);
+  }
+
+  // Get address with coordinates fallback
+  Future<String> getAddressWithCoordinatesFallback(double lat, double lng) async {
+    final address = await getAddressFromCoordinates(lat, lng);
+    if (address != null && address.isNotEmpty) {
+      return address;
+    }
+    return getCoordinatesDisplay(lat, lng);
   }
 }

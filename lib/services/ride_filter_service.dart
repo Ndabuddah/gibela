@@ -78,36 +78,49 @@ class RideFilterService {
       ride.pickupLng,
     );
 
+    // Debug logging for ride filtering
+    print('🚗 Ride ${ride.id}: Distance ${distance.toStringAsFixed(2)}km from driver');
+    print('   Driver location: ${driverLocation.latitude}, ${driverLocation.longitude}');
+    print('   Pickup location: ${ride.pickupLat}, ${ride.pickupLng}');
+    print('   Vehicle type: ${ride.vehicleType} vs Driver: ${driver.vehicleType}');
+
     // Distance-based filtering (progressive distance expansion)
     if (!_isWithinDistanceRange(distance)) {
+      print('   ❌ Filtered out: Distance ${distance.toStringAsFixed(2)}km > 10km limit');
       return false;
     }
 
     // Asambe Girl filtering
     if (ride.isAsambeGirl && (driver.isFemale != true)) {
+      print('   ❌ Filtered out: Girl ride but driver is not female');
       return false;
     }
 
     // Asambe Student filtering
     if (ride.isAsambeStudent && (driver.isForStudents != true)) {
+      print('   ❌ Filtered out: Student ride but driver is not for students');
       return false;
     }
 
     // Asambe Luxury filtering
     if (ride.isAsambeLuxury && (driver.isLuxury != true)) {
+      print('   ❌ Filtered out: Luxury ride but driver is not luxury');
       return false;
     }
 
     // Passenger count filtering for Max2 drivers
     if (driver.isMax2 == true && ride.passengerCount > 2) {
+      print('   ❌ Filtered out: Max2 driver but ride has ${ride.passengerCount} passengers');
       return false;
     }
 
     // Vehicle type compatibility
     if (!_isVehicleTypeCompatible(ride.vehicleType, driver)) {
+      print('   ❌ Filtered out: Vehicle type mismatch');
       return false;
     }
 
+    print('   ✅ Ride will be shown to driver');
     return true;
   }
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:developer' as developer;
+import 'package:flutter/foundation.dart';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -133,11 +134,15 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
       setState(() {
         _currentLatLng = latlong2.LatLng(pos.latitude, pos.longitude);
       });
+      
+      // Debug logging for location
+      print('📍 Driver location updated: ${pos.latitude}, ${pos.longitude}');
     } else {
       // Default to Johannesburg if location not available
       setState(() {
         _currentLatLng = latlong2.LatLng(-26.2041, 28.0473);
       });
+      print('⚠️ Using default Johannesburg location');
     }
   }
 
@@ -223,6 +228,9 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
 
         final rides = snapshot.data ?? [];
         
+        // Debug logging for ride count
+        print('🎯 Found ${rides.length} ride requests for driver');
+        
         if (rides.isEmpty) {
           return Center(
             child: Column(
@@ -247,6 +255,37 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
                   ),
                   textAlign: TextAlign.center,
                 ),
+                const SizedBox(height: 16),
+                // Debug info for developers
+                if (kDebugMode) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          'Debug Info:',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[700],
+                          ),
+                        ),
+                        Text(
+                          'Driver Location: ${_currentLatLng?.latitude.toStringAsFixed(4)}, ${_currentLatLng?.longitude.toStringAsFixed(4)}',
+                          style: TextStyle(fontSize: 10, color: Colors.blue[600]),
+                        ),
+                        Text(
+                          'Vehicle Type: ${_currentDriver?.vehicleType ?? 'Not set'}',
+                          style: TextStyle(fontSize: 10, color: Colors.blue[600]),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           );
@@ -326,7 +365,9 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      ride.pickupAddress,
+                      ride.pickupAddress.isNotEmpty 
+                          ? ride.pickupAddress 
+                          : '📍 ${ride.pickupLat.toStringAsFixed(4)}, ${ride.pickupLng.toStringAsFixed(4)}',
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -350,7 +391,9 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      ride.dropoffAddress.isNotEmpty ? ride.dropoffAddress : 'No dropoff address',
+                      ride.dropoffAddress.isNotEmpty 
+                          ? ride.dropoffAddress 
+                          : '📍 ${ride.dropoffLat.toStringAsFixed(4)}, ${ride.dropoffLng.toStringAsFixed(4)}',
                       style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 15),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
