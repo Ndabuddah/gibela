@@ -149,16 +149,34 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
 
           // Create UserModel for passenger
           print('👤 Creating UserModel...');
+          // Create user model based on selected role
+          print('🚗 Creating new user with role: $_selectedRole');
+          
+          // Create initial user model with enforced driver flags
           final userModel = UserModel(
             uid: user.uid,
             email: _emailController.text.trim(),
             name: _fullNameController.text.trim(),
             phoneNumber: _phoneController.text.trim(),
-            isDriver: _selectedRole == 'driver',
-            isApproved: _selectedRole != 'driver', // Only passengers are auto-approved
             surname: _surnameController.text.trim(),
+            // Enforce driver flags
+            isDriver: _selectedRole == 'driver',
+            // Force isApproved to false for drivers
+            isApproved: _selectedRole == 'driver' ? false : true,
+            // Force driver signup requirement
+            requiresDriverSignup: _selectedRole == 'driver' ? true : false,
+            // Set initial status - removed approvalStatus as it's not a parameter
+            // Initialize other fields
+            savedAddresses: const [],
+            recentRides: const [],
+            isOnline: false,
+            rating: 5.0,
+            missingProfileFields: const [],
           );
           print('✅ UserModel created: ${userModel.name}');
+          print('🚗 Is Driver: ${userModel.isDriver}');
+          print('✓ Is Approved: ${userModel.isApproved}');
+          print('📝 Requires Driver Signup: ${userModel.requiresDriverSignup}');
 
           // Save passenger details to Firestore
           print('💾 Saving user to Firestore...');

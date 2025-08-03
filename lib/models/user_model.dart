@@ -9,6 +9,7 @@ class UserModel {
   final String? profileImage;
   final bool isDriver;
   final bool isApproved;
+  final bool requiresDriverSignup;
   final List<String> savedAddresses;
   final List<String> recentRides;
   final String? photoUrl;
@@ -31,6 +32,7 @@ class UserModel {
     this.profileImage,
     this.isDriver = false,
     this.isApproved = false,
+    this.requiresDriverSignup = false,
     this.savedAddresses = const [],
     this.recentRides = const [],
     this.photoUrl,
@@ -54,6 +56,7 @@ class UserModel {
       profileImage: data['profileImage'] ?? data['profileImageUrl'], // Support Firestore field 'profileImageUrl'
       isDriver: data['isDriver'] ?? false,
       isApproved: data['isApproved'] ?? false,
+      requiresDriverSignup: data['requiresDriverSignup'] ?? false,
       savedAddresses: List<String>.from(data['savedAddresses'] ?? []),
       recentRides: List<String>.from(data['recentRides'] ?? []),
       photoUrl: data['photoUrl'],
@@ -78,6 +81,7 @@ class UserModel {
       'profileImage': profileImage,
       'isDriver': isDriver,
       'isApproved': isApproved,
+      'requiresDriverSignup': requiresDriverSignup,
       'savedAddresses': savedAddresses,
       'recentRides': recentRides,
       'photoUrl': photoUrl,
@@ -101,6 +105,7 @@ class UserModel {
     String? profileImage,
     bool? isDriver,
     bool? isApproved,
+    bool? requiresDriverSignup,
     List<String>? savedAddresses,
     List<String>? recentRides,
     String? photoUrl,
@@ -122,6 +127,7 @@ class UserModel {
       profileImage: profileImage ?? this.profileImage,
       isDriver: isDriver ?? this.isDriver,
       isApproved: isApproved ?? this.isApproved,
+      requiresDriverSignup: requiresDriverSignup ?? this.requiresDriverSignup,
       savedAddresses: savedAddresses ?? this.savedAddresses,
       recentRides: recentRides ?? this.recentRides,
       photoUrl: photoUrl ?? this.photoUrl,

@@ -179,7 +179,9 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
 
             if (!mounted) return;
             Navigator.of(context).pushAndRemoveUntil(
-              MaterialPageRoute(builder: (context) => const DriverHomeScreen()),
+              MaterialPageRoute(
+                builder: (context) => const DriverHomeScreen(),
+              ),
               (route) => false,
             );
 

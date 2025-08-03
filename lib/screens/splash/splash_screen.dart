@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:gibelbibela/screens/auth/login_screen.dart';
 import 'package:provider/provider.dart';
@@ -7,13 +8,14 @@ import '../../constants/app_colors.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/auth_service.dart';
 import '../../services/database_service.dart';
+import '../../services/driver_access_service.dart';
 import '../../widgets/common/modern_loading_indicator.dart';
-import '../auth/email_verification_screen.dart';
 import '../auth/passenger_registration_screen.dart';
 import '../home/driver/driver_home_screen.dart';
 import '../auth/driver_signup_screen.dart';
 import '../home/passenger/passenger_home_screen.dart';
 import '../onboarding/onboarding_screen.dart';
+import '../payments/payment_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -99,99 +101,113 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
       final destination = hasSeenOnboarding ? const LoginScreen() : const OnboardingScreen();
       Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => destination));
     } else {
-      // User is logged in, but we need to check their verification and registration status
+      // User is logged in, check their verification and registration status
+      try {
+        // Removed _silentlyCheckEmailVerification(user) - no need to check email verification on every startup
 
-      // First, check if email is verified
-      await user.reload(); // Refresh user data
-      final refreshedUser = authService.currentUser;
-
-      if (refreshedUser == null || !refreshedUser.emailVerified) {
-        // Email not verified, send to verification screen
-        // We need to determine if they're a driver or passenger from their profile
+        // Email is verified, now check registration completion
         final userModel = await Provider.of<DatabaseService>(context, listen: false).getUserById(user.uid);
-        final isDriver = userModel?.isDriver ?? false;
 
         if (!mounted) return;
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => EmailVerificationScreen(user: user, isDriver: isDriver),
-          ),
-        );
-        return;
-      }
 
-      // Email is verified, now check registration completion
-      final userModel = await Provider.of<DatabaseService>(context, listen: false).getUserById(user.uid);
-
-      if (!mounted) return;
-
-      if (userModel == null) {
-        // User is authenticated but has no profile data, this is an error state.
-        // Send them to the login screen to be safe.
-        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => const LoginScreen()));
-        return;
-      }
-
-      // Check if registration is complete based on user type
-      if (userModel.isDriver) {
-        // For drivers, check if they have completed driver registration
-        final databaseService = Provider.of<DatabaseService>(context, listen: false);
-        final driverModel = await databaseService.getDriverByUserId(user.uid);
-        
-        // If no driver profile exists or required fields are missing, send to driver registration
-        if (driverModel == null || 
-            driverModel.idNumber.isEmpty || 
-            driverModel.documents.isEmpty ||
-            driverModel.vehicleType == null ||
-            driverModel.vehicleModel == null ||
-            driverModel.vehicleColor == null ||
-            driverModel.licensePlate == null ||
-            driverModel.towns.isEmpty ||
-            !driverModel.isApproved) {
-          print('🚗 Driver registration status:');
-          print('- Driver model exists: ${driverModel != null}');
-          print('- ID Number: ${driverModel?.idNumber.isNotEmpty}');
-          print('- Documents: ${driverModel?.documents.isNotEmpty}');
-          print('- Vehicle Type: ${driverModel?.vehicleType != null}');
-          print('- Vehicle Model: ${driverModel?.vehicleModel != null}');
-          print('- Vehicle Color: ${driverModel?.vehicleColor != null}');
-          print('- License Plate: ${driverModel?.licensePlate != null}');
-          print('- Towns: ${driverModel?.towns.isNotEmpty}');
-          print('- Approved: ${driverModel?.isApproved}');
-          print('🚗 Driver registration incomplete, redirecting to registration...');
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (context) => const DriverSignupScreen(),
-            ),
-          );
-        } else {
-          // Driver registration is complete, go to home screen
-          print('✅ Driver registration complete, going to home screen...');
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (context) => const DriverHomeScreen(),
-            ),
-          );
+        if (userModel == null) {
+          // User is authenticated but has no profile data, this is an error state.
+          // Send them to the login screen to be safe.
+          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => const LoginScreen()));
+          return;
         }
-      } else {
-        // For passengers, check if they have completed registration
-        // Check for the isRegistered flag that was set in passenger registration
-        try {
-          final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-          final userData = userDoc.data();
-          final isRegistrationComplete = userData?['isRegistered'] == true;
 
-          if (!isRegistrationComplete) {
-            // Registration not complete, send to passenger registration
-            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => const PassengerRegistrationScreen()));
-          } else {
-            // Registration complete, go to home
-            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => const PassengerHomeScreen()));
+        // Handle driver flow
+        if (userModel.isDriver) {
+          print('🚗 User is a driver, checking access...');
+          
+          final driverAccessService = DriverAccessService();
+          final accessCheck = await driverAccessService.checkDriverAccess(user.uid);
+          
+          print('🔍 Driver access check results:');
+          print('- Can Access: ${accessCheck['canAccess']}');
+          print('- Status: ${accessCheck['status']}');
+          print('- Reason: ${accessCheck['reason']}');
+          
+          // If signup is required, redirect to driver signup
+          if (accessCheck['status'] == 'signup_required') {
+            print('📝 Driver signup required, redirecting...');
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => const DriverSignupScreen(),
+              ),
+            );
+            return;
           }
-        } catch (e) {
-          // Error checking registration status, send to registration to be safe
-          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => const PassengerRegistrationScreen()));
+
+          // If payment is required, redirect to payment
+          if (accessCheck['status'] == 'payment_required') {
+            print('💰 Payment required, redirecting...');
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => PaymentScreen(
+                  amount: 150.00,  // Driver registration fee
+                  email: userModel.email,
+                  onPaymentSuccess: () {
+                    // After successful payment, navigate to driver signup to complete profile
+                    Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(
+                        builder: (_) => const DriverSignupScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            );
+            return;
+          }
+
+          // Always send drivers to home screen - let home screen handle validation
+          print('✅ Driver going to home screen');
+          print('- Is Approved: ${accessCheck['isApproved']}');
+          print('- Status: ${accessCheck['status']}');
+          
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => const DriverHomeScreen(),
+            ),
+          );
+          return;
         }
+
+        // Handle passenger flow
+        if (!userModel.isDriver) {
+          print('👤 User is a passenger, checking registration...');
+          
+          // Check for the isRegistered flag that was set in passenger registration
+          try {
+            final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+            final userData = userDoc.data();
+            final isRegistrationComplete = userData?['isRegistered'] == true;
+
+            if (!isRegistrationComplete) {
+              // Registration not complete, send to passenger registration
+              Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => const PassengerRegistrationScreen()));
+            } else {
+              // Registration complete, go to home
+              Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => const PassengerHomeScreen()));
+            }
+          } catch (e) {
+            print('Error checking passenger registration status: $e');
+            // Error checking registration status, send to registration to be safe
+            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => const PassengerRegistrationScreen()));
+          }
+          return;
+        }
+
+        // Fallback: send to login if we can't determine user type
+        print('⚠️ Could not determine user type, redirecting to login');
+        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => const LoginScreen()));
+        
+      } catch (e) {
+        print('Error in navigation logic: $e');
+        // On any error, send to login screen
+        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => const LoginScreen()));
       }
     }
   }
@@ -200,6 +216,56 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
     // In a real app, you'd check SharedPreferences or similar
     // For now, we'll assume they haven't seen it
     return false;
+  }
+
+  // Cache email verification status to avoid unnecessary reloads
+  static final Map<String, bool> _emailVerificationCache = {};
+  
+  Future<bool> _isEmailVerified(User user) async {
+    // Check cache first
+    if (_emailVerificationCache.containsKey(user.uid)) {
+      return _emailVerificationCache[user.uid]!;
+    }
+    
+    // Check current status
+    bool isVerified = user.emailVerified;
+    
+    // Only reload if not verified (to avoid unnecessary network calls)
+    if (!isVerified) {
+      await user.reload();
+      isVerified = user.emailVerified;
+    }
+    
+    // Cache the result
+    _emailVerificationCache[user.uid] = isVerified;
+    
+    return isVerified;
+  }
+  
+  // Clear verification cache for a specific user (call after successful verification)
+  static void clearVerificationCache(String userId) {
+    _emailVerificationCache.remove(userId);
+  }
+  
+  // Clear all verification cache
+  static void clearAllVerificationCache() {
+    _emailVerificationCache.clear();
+  }
+  
+  // Silently check email verification without blocking navigation
+  void _silentlyCheckEmailVerification(User user) async {
+    try {
+      bool isVerified = await _isEmailVerified(user);
+      
+      // If not verified, we'll handle it in the destination screen
+      // Don't block navigation here - let the user proceed
+      if (!isVerified) {
+        print('⚠️ Email not verified, but allowing navigation to continue');
+      }
+    } catch (e) {
+      print('❌ Error checking email verification: $e');
+      // Don't block navigation on error
+    }
   }
 
   @override

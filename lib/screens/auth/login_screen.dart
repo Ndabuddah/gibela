@@ -8,9 +8,12 @@ import '../../models/user_model.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/auth_service.dart';
 import '../../services/database_service.dart';
+import '../../services/driver_access_service.dart';
 import '../../widgets/common/modern_alert_dialog.dart';
 import '../home/driver/driver_home_screen.dart';
 import '../home/passenger/passenger_home_screen.dart';
+import 'driver_signup_screen.dart';
+import '../payments/payment_screen.dart';
 import 'signup_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -105,10 +108,53 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
         return;
       }
 
-      if (userModel.role == 'driver') {
+      if (userModel.isDriver) {
+        print('🚗 User is a driver, checking signup status...');
+        
+        // Check if driver signup is required
         final dbService = Provider.of<DatabaseService>(context, listen: false);
+        final needsSignup = await dbService.needsDriverSignup(userModel.uid);
+        
+        if (needsSignup) {
+          print('📝 Driver needs to complete signup');
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => const DriverSignupScreen(),
+            ),
+          );
+          return;
+        }
+
+        print('✅ Driver signup completed, checking payment and status...');
+        final driverAccessService = DriverAccessService();
+        final accessCheck = await driverAccessService.checkDriverAccess(userModel.uid);
+
+        // If payment is required after signup
+        if (accessCheck['status'] == 'payment_required') {
+          print('💰 Payment required');
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => PaymentScreen(
+                amount: 150.00,  // Driver registration fee
+                email: userModel?.email ?? '',
+                onPaymentSuccess: () {
+                  // After successful payment, navigate to driver home
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(
+                      builder: (_) => const DriverHomeScreen(),
+                    ),
+                  );
+                },
+              ),
+            ),
+          );
+          return;
+        }
+
+        // Driver can access home screen
         await dbService.setUserOnlineStatus(userModel.uid, true);
         await dbService.setDriverOnlineStatus(userModel.uid, true);
+
         Navigator.of(context).pushReplacement(
           PageRouteBuilder(
             pageBuilder: (context, animation, secondaryAnimation) => const DriverHomeScreen(),

@@ -7,6 +7,8 @@ import 'package:gibelbibela/widgets/common/custom_button.dart';
 
 import '../../../constants/app_colors.dart';
 import '../../../providers/theme_provider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:gibelbibela/services/database_service.dart';
 
 class PaymentScreen extends StatefulWidget {
   final double amount;
@@ -69,15 +71,47 @@ class _PaymentScreenState extends State<PaymentScreen> with TickerProviderStateM
     try {
       await PaystackFlutter().pay(
         context: context,
-        secretKey: 'YOUR_SECRET_KEY', // Replace with your key from secure storage
+        secretKey: 'sk_live_50be0cff4e564295a8723aa3c8432d805895e248', // Using the same key as ride request payment
         amount: (widget.amount * 100).toDouble(),
         email: widget.email,
         callbackUrl: 'https://callback.com',
         showProgressBar: true,
         paymentOptions: [PaymentOption.card, PaymentOption.bankTransfer],
         currency: Currency.ZAR,
-        onSuccess: (callback) {
-          widget.onPaymentSuccess();
+        onSuccess: (callback) async {
+          try {
+            // Record payment in database
+            await _recordPayment(callback.reference);
+            
+            // Add delay to ensure database transaction is complete
+            await Future.delayed(const Duration(seconds: 2));
+            
+            // Verify payment was recorded successfully
+            final user = FirebaseAuth.instance.currentUser;
+            if (user != null) {
+              final verified = await DatabaseService().verifyDriverPayment(user.uid);
+              if (verified) {
+                // Call success callback only after verification
+                widget.onPaymentSuccess();
+              } else {
+                // Payment verification failed
+                setState(() {
+                  _error = 'Payment verification failed. Please contact support.';
+                  _isLoading = false;
+                });
+              }
+            } else {
+              setState(() {
+                _error = 'User session expired. Please try again.';
+                _isLoading = false;
+              });
+            }
+          } catch (e) {
+            setState(() {
+              _error = 'Payment verification error: ${e.toString()}';
+              _isLoading = false;
+            });
+          }
         },
         onCancelled: (callback) {
           setState(() {
@@ -298,7 +332,7 @@ class _PaymentScreenState extends State<PaymentScreen> with TickerProviderStateM
 
   Widget _buildPaymentButton() {
     return CustomButton(
-      text: _isLoading ? 'Processing Payment...' : 'Pay Securely',
+      text: _isLoading ? 'Processing Payment...' : 'Pay R${widget.amount.toStringAsFixed(0)} Securely',
       onPressed: _isLoading ? null : _pay,
       isDisabled: _isLoading,
       icon: Icons.lock_outline,
@@ -325,5 +359,23 @@ class _PaymentScreenState extends State<PaymentScreen> with TickerProviderStateM
         ),
       ],
     );
+  }
+
+  // Record payment in database
+  Future<void> _recordPayment(String reference) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await DatabaseService().recordDriverPayment(
+          user.uid,
+          widget.amount,
+          reference,
+        );
+      }
+    } catch (e) {
+      print('Error recording payment: $e');
+      // Don't throw error here as payment was successful
+      // Just log it for debugging
+    }
   }
 }

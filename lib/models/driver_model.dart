@@ -24,6 +24,15 @@ class DriverModel {
   final bool? isLuxury;
   final bool? isMax2;
   final List<String> vehiclePurposes;
+  
+  // New fields for enhanced profile management
+  final Map<String, bool> documentVerificationStatus;
+  final Map<String, DateTime> documentExpiryDates;
+  final Map<String, dynamic> vehicleInformation;
+  final Map<String, List<String>> serviceAreaPreferences;
+  final Map<String, List<String>> workingHours;
+  final Map<String, dynamic> driverPreferences;
+  final double profileCompletionPercentage;
 
   DriverModel({
     required this.userId,
@@ -49,9 +58,35 @@ class DriverModel {
     this.isLuxury,
     this.isMax2,
     this.vehiclePurposes = const [],
+    this.documentVerificationStatus = const {},
+    this.documentExpiryDates = const {},
+    this.vehicleInformation = const {},
+    this.serviceAreaPreferences = const {},
+    this.workingHours = const {},
+    this.driverPreferences = const {},
+    this.profileCompletionPercentage = 0.0,
   });
 
   factory DriverModel.fromMap(Map<String, dynamic> data) {
+    // Convert document verification status
+    final verificationStatus = (data['documentVerificationStatus'] as Map<String, dynamic>?)?.map(
+          (key, value) => MapEntry(key, value as bool),
+        ) ?? {};
+
+    // Convert document expiry dates
+    final expiryDates = (data['documentExpiryDates'] as Map<String, dynamic>?)?.map(
+          (key, value) => MapEntry(key, DateTime.parse(value as String)),
+        ) ?? {};
+
+    // Convert service area preferences
+    final areaPrefs = (data['serviceAreaPreferences'] as Map<String, dynamic>?)?.map(
+          (key, value) => MapEntry(key, (value as List).cast<String>()),
+        ) ?? {};
+
+    // Convert working hours
+    final hours = (data['workingHours'] as Map<String, dynamic>?)?.map(
+          (key, value) => MapEntry(key, (value as List).cast<String>()),
+        ) ?? {};
     return DriverModel(
       userId: data['userId'] ?? '',
       idNumber: data['idNumber'] ?? '',
@@ -59,7 +94,7 @@ class DriverModel {
       phoneNumber: data['phoneNumber'] ?? '',
       email: data['email'] ?? '',
       province: data['province'],
-      towns: List<String>.from(data['towns'] ?? []),
+      towns: (data['towns'] as List<dynamic>?)?.cast<String>() ?? [],
       documents: Map<String, String>.from(data['documents'] ?? {}),
       vehicleType: data['vehicleType'],
       vehicleModel: data['vehicleModel'],
@@ -77,7 +112,14 @@ class DriverModel {
       isForStudents: data['IsForStudents'],
       isLuxury: data['isLuxury'],
       isMax2: data['isMax2'] ?? false,
-      vehiclePurposes: List<String>.from(data['vehiclePurposes'] ?? []),
+      vehiclePurposes: (data['vehiclePurposes'] as List<dynamic>?)?.cast<String>() ?? [],
+      documentVerificationStatus: verificationStatus,
+      documentExpiryDates: expiryDates,
+      vehicleInformation: data['vehicleInformation'] as Map<String, dynamic>? ?? {},
+      serviceAreaPreferences: areaPrefs,
+      workingHours: hours,
+      driverPreferences: data['driverPreferences'] as Map<String, dynamic>? ?? {},
+      profileCompletionPercentage: (data['profileCompletionPercentage'] ?? 0.0).toDouble(),
     );
   }
 

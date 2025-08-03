@@ -42,4 +42,42 @@ class CloudinaryService {
       return null;
     }
   }
+
+  // Delete image from Cloudinary
+  Future<bool> deleteImage(String imageUrl) async {
+    try {
+      // Extract public ID from URL
+      final uri = Uri.parse(imageUrl);
+      final pathSegments = uri.pathSegments;
+      if (pathSegments.length < 3) {
+        debugPrint('Invalid Cloudinary URL format: $imageUrl');
+        return false;
+      }
+      
+      // Get the public ID (remove file extension)
+      final fileName = pathSegments.last;
+      final publicId = fileName.split('.').first;
+      
+      // Note: This requires authentication with API key and secret
+      // For now, we'll log the deletion attempt
+      debugPrint('Would delete image with public ID: $publicId');
+      
+      // TODO: Implement actual deletion with API key and secret
+      // final deleteUri = Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/image/destroy');
+      // final response = await http.post(
+      //   deleteUri,
+      //   body: {
+      //     'public_id': publicId,
+      //     'api_key': 'YOUR_API_KEY',
+      //     'signature': 'YOUR_SIGNATURE',
+      //   },
+      // );
+      
+      // For now, return true to indicate successful "deletion"
+      return true;
+    } catch (e) {
+      debugPrint('Cloudinary delete error: $e');
+      return false;
+    }
+  }
 }

@@ -22,24 +22,17 @@ class ReferralCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            AppColors.primary.withOpacity(0.1),
-            AppColors.primary.withOpacity(0.05),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
+        color: isDark ? Colors.black12 : Colors.white,
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: AppColors.primary.withOpacity(0.2),
-          width: 1.5,
+          color: AppColors.primary.withOpacity(0.3),
+          width: 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: AppColors.primary.withOpacity(0.1),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -52,15 +45,15 @@ class ReferralCard extends StatelessWidget {
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Icon(
                     Icons.card_giftcard,
-                    color: AppColors.primary,
-                    size: 28,
+                    color: Colors.white,
+                    size: 24,
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -71,16 +64,19 @@ class ReferralCard extends StatelessWidget {
                       Text(
                         'Referral Program',
                         style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.primary,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: isDark ? Colors.white : Colors.black87,
+                          letterSpacing: -0.5,
                         ),
                       ),
+                      const SizedBox(height: 4),
                       Text(
-                        'Earn R15 for every successful driver referral!',
+                        'Earn R50 for referring new drivers!',
                         style: TextStyle(
-                          fontSize: 14,
-                          color: AppColors.getTextSecondaryColor(isDark),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                          color: isDark ? Colors.white70 : Colors.black54,
                         ),
                       ),
                     ],
@@ -116,23 +112,24 @@ class ReferralCard extends StatelessWidget {
 
             // Referral Code Section
             Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: isDark ? Colors.white.withOpacity(0.05) : Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: AppColors.primary.withOpacity(0.2),
-                ),
-              ),
+                    padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withOpacity(0.08) : AppColors.primary.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.white.withOpacity(0.1) : AppColors.primary.withOpacity(0.15),
+        ),
+      ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     'Your Referral Code',
                     style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.getTextPrimaryColor(isDark),
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : Colors.black87,
+                      letterSpacing: -0.3,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -145,11 +142,18 @@ class ReferralCard extends StatelessWidget {
                             vertical: 12,
                           ),
                           decoration: BoxDecoration(
-                            color: AppColors.primary.withOpacity(0.1),
+                            color: isDark ? Colors.black26 : Colors.white,
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                              color: AppColors.primary.withOpacity(0.3),
+                              color: isDark ? Colors.white.withOpacity(0.1) : Colors.black12,
                             ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.03),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
                           ),
                           child: Row(
                             children: [
@@ -162,12 +166,13 @@ class ReferralCard extends StatelessWidget {
                               Expanded(
                                 child: Text(
                                   userId,
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.primary,
-                                    fontFamily: 'monospace',
-                                  ),
+                                                                      style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      color: isDark ? Colors.white : Colors.black87,
+                                      fontFamily: 'monospace',
+                                      letterSpacing: 0.5,
+                                    ),
                                 ),
                               ),
                             ],
@@ -187,10 +192,17 @@ class ReferralCard extends StatelessWidget {
                           );
                         },
                         child: Container(
-                          padding: const EdgeInsets.all(12),
+                          padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
                             color: AppColors.primary,
                             borderRadius: BorderRadius.circular(8),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.primary.withOpacity(0.2),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
                           ),
                           child: Icon(
                             Icons.copy,
@@ -241,7 +253,7 @@ class ReferralCard extends StatelessWidget {
                   Text(
                     '1. Share your referral code with friends\n'
                     '2. When they register as drivers using your code\n'
-                    '3. You earn R15 for each successful referral\n'
+                    '3. You earn R50 for each successful referral\n'
                     '4. Earnings are paid out monthly',
                     style: TextStyle(
                       fontSize: 13,

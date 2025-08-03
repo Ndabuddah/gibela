@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:gibelbibela/models/driver_model.dart';
 import 'package:gibelbibela/models/notification_model.dart';
 import 'package:gibelbibela/models/user_model.dart';
@@ -7,6 +9,7 @@ import 'package:gibelbibela/screens/driver/ride_history_screen.dart' as driver_h
 import 'package:gibelbibela/screens/home/driver/earnings_screen.dart';
 import 'package:gibelbibela/screens/permissions/location_permission_screen.dart';
 import 'package:gibelbibela/services/database_service.dart';
+import 'package:gibelbibela/services/driver_access_service.dart';
 import 'package:gibelbibela/services/permission_service.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -19,17 +22,21 @@ import '../../../widgets/common/custom_button.dart';
 import '../../../widgets/common/modern_alert_dialog.dart';
 import '../../../widgets/common/modern_drawer.dart';
 import '../../auth/driver_signup_screen.dart';
+import '../../auth/email_verification_screen.dart';
 import '../../notifications/notification_screen.dart';
+import '../../payments/payment_screen.dart';
 import 'ride_request_list_screen.dart';
 
 class DriverHomeScreen extends StatefulWidget {
-  const DriverHomeScreen({super.key});
+  const DriverHomeScreen({
+    super.key,
+  });
 
   @override
   State<DriverHomeScreen> createState() => _DriverHomeScreenState();
 }
 
-class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProviderStateMixin {
+class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   bool _isLoading = false;
@@ -57,12 +64,15 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); // Add lifecycle observer
     _initializeAnimations();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Removed _validateDriverAccess() - no need to validate on every startup
       _fetchAndSetUser();
       _fetchRecentRides();
       _loadUserData(); // Add this to load initial online status
-      _checkLocationPermissions();
+      // Removed _checkLocationPermissions() - no need to check permissions on every startup
+      // Removed _checkApprovalStatus() - let validation banner handle it
     });
     _getCurrentLocation();
     fetchEarnings();
@@ -71,17 +81,33 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
   }
 
   Future<void> _fetchAndSetUser() async {
-    final authService = Provider.of<AuthService>(context, listen: false);
-    await authService.fetchCurrentUser();
-    // No setState() needed, provider will notify listeners
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      await authService.fetchCurrentUser();
+      // No setState() needed, provider will notify listeners
+    } catch (e) {
+      print('Error fetching user: $e');
+      // Handle error gracefully - user can still use the app
+    }
   }
 
   Future<void> _fetchDriver() async {
-    final driver = await DatabaseService().getCurrentDriver();
-    setState(() {
-      _driver = driver;
-      _loading = false;
-    });
+    try {
+      final driver = await DatabaseService().getCurrentDriver();
+      if (mounted) {
+        setState(() {
+          _driver = driver;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      print('Error fetching driver: $e');
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
   }
 
   bool get _needsProfileCompletion {
@@ -89,9 +115,49 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
       // If the driver object itself is null, profile is definitely incomplete.
       return true;
     }
-    // For a new driver, we only require the most basic fields to be present.
-    // The rest can be filled out later or are set upon approval.
-    return _driver!.name.isEmpty || _driver!.phoneNumber.isEmpty || _driver!.email.isEmpty;
+    
+    // Check for basic required fields
+    final hasBasicInfo = _driver!.name.isNotEmpty && 
+                        _driver!.phoneNumber.isNotEmpty && 
+                        _driver!.email.isNotEmpty;
+    
+    if (!hasBasicInfo) {
+      return true;
+    }
+    
+    // Check for required driver-specific fields
+    final hasRequiredFields = _driver!.idNumber?.isNotEmpty == true &&
+                             _driver!.vehicleType != null &&
+                             _driver!.vehicleModel != null &&
+                             _driver!.licensePlate != null &&
+                             (_driver!.towns?.isNotEmpty ?? false);
+    
+    // Check for required documents
+    final hasDocuments = _driver!.documents != null && 
+                        _driver!.documents!.isNotEmpty;
+    
+    return !hasRequiredFields || !hasDocuments;
+  }
+
+  // Check if payment is required
+  Future<bool> _isPaymentRequired() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return true;
+      
+      final paymentsQuery = await FirebaseFirestore.instance
+          .collection('driver_payments')
+          .where('driverId', isEqualTo: user.uid)
+          .where('status', isEqualTo: 'success')
+          .orderBy('timestamp', descending: true)
+          .limit(1)
+          .get();
+
+      return paymentsQuery.docs.isEmpty;
+    } catch (e) {
+      print('Error checking payment status: $e');
+      return true; // Assume payment is required if there's an error
+    }
   }
 
   void _initializeAnimations() {
@@ -226,6 +292,124 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
   }
 
   void _viewRideRequests() {
+    // Check if driver is approved before allowing access to ride requests
+    final user = Provider.of<AuthService>(context, listen: false).userModel;
+    if (user?.isApproved != true) {
+      // Show modern, beautiful dialog explaining why they can't access ride requests
+      showDialog(
+        context: context,
+        barrierDismissible: true,
+        builder: (context) => Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white,
+                  Colors.grey.shade50,
+                ],
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Icon with background
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Colors.orange.shade400, Colors.orange.shade600],
+                    ),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.hourglass_empty,
+                    color: Colors.white,
+                    size: 40,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                
+                // Title
+                const Text(
+                  'Account Under Review',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                
+                // Message
+                const Text(
+                  'Your driver account is currently being reviewed by our team. This process typically takes 24-48 hours.',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.black54,
+                    height: 1.4,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                
+                const Text(
+                  'You\'ll be able to view and accept ride requests once your account is approved.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.black45,
+                    height: 1.3,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                
+                // Action button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange.shade600,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: const Text(
+                      'Got it!',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+
+    // Driver is approved, proceed to ride requests
     Navigator.of(context).push(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) => const RideRequestListScreen(),
@@ -343,12 +527,193 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
     }
   }
 
+  // Driver validation state
+  String? _validationStatus;
+  String? _validationMessage;
+  bool _showValidationBanner = false;
+
+  // Comprehensive driver validation check - now user-friendly
+  Future<void> _validateDriverAccess() async {
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final user = authService.currentUser;
+      
+      if (user == null) {
+        // No user logged in, redirect to login
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const LoginScreen())
+        );
+        return;
+      }
+
+      // Silently check email verification in background
+      _silentlyCheckEmailVerification(user);
+
+      // Check driver access using the same logic as splash screen
+      final driverAccessService = DriverAccessService();
+      final accessCheck = await driverAccessService.checkDriverAccess(user.uid);
+      
+      print('🔍 Driver access validation results:');
+      print('- Can Access: ${accessCheck['canAccess']}');
+      print('- Status: ${accessCheck['status']}');
+      print('- Reason: ${accessCheck['reason']}');
+      
+      // Handle different access scenarios - now with user-friendly approach
+      switch (accessCheck['status']) {
+        case 'signup_required':
+          print('📝 Driver signup required, showing banner...');
+          setState(() {
+            _validationStatus = 'signup_required';
+            _validationMessage = 'Complete your driver profile to start earning';
+            _showValidationBanner = true;
+          });
+          return;
+          
+        case 'payment_required':
+          print('💰 Payment required, showing banner...');
+          setState(() {
+            _validationStatus = 'payment_required';
+            _validationMessage = 'Complete payment to activate your driver account';
+            _showValidationBanner = true;
+          });
+          return;
+          
+        case 'email_verification_required':
+          // Check if user's email is actually verified before redirecting
+          bool isEmailVerified = user.emailVerified;
+          
+          // Only reload if not verified (to avoid unnecessary network calls)
+          if (!isEmailVerified) {
+            await user.reload();
+            isEmailVerified = user.emailVerified;
+          }
+          
+          // Only redirect to email verification screen if email is actually not verified
+          if (!isEmailVerified) {
+            final userModel = await Provider.of<DatabaseService>(context, listen: false).getUserById(user.uid);
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (context) => EmailVerificationScreen(user: user, isDriver: true),
+              ),
+            );
+            return;
+          } else {
+            // Email is verified, but driver access service thinks it's not
+            // This might be a stale status, so let's re-validate
+            print('✅ Email is verified, re-validating driver access');
+            _validateDriverAccess();
+            return;
+          }
+          
+        case 'error':
+          print('❌ Driver access error, redirecting to login');
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (context) => const LoginScreen())
+          );
+          return;
+          
+        case 'approved':
+        case 'awaiting_approval':
+          // Driver can stay on home screen regardless of approval status
+          // The home screen will show appropriate banners and UI
+          setState(() {
+            _showValidationBanner = false;
+          });
+          break;
+          
+        default:
+          print('⚠️ Unknown driver status: ${accessCheck['status']}, redirecting to login');
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (context) => const LoginScreen())
+          );
+          return;
+      }
+    } catch (e) {
+      print('❌ Error validating driver access: $e');
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const LoginScreen())
+      );
+    }
+  }
+
+  // Silently check email verification without blocking UI
+  void _silentlyCheckEmailVerification(User user) async {
+    try {
+      bool isVerified = user.emailVerified;
+      
+      // Only reload if not verified (to avoid unnecessary network calls)
+      if (!isVerified) {
+        await user.reload();
+        isVerified = user.emailVerified;
+      }
+      
+      // If not verified, add it to validation status for subtle UI feedback
+      if (!isVerified && mounted) {
+        setState(() {
+          _validationStatus = 'email_verification_required';
+          _validationMessage = 'Please verify your email to access all features';
+          _showValidationBanner = true;
+        });
+      }
+    } catch (e) {
+      print('❌ Error checking email verification: $e');
+      // Don't block user experience on error
+    }
+  }
+
+  // Handle validation banner actions
+  Future<void> _handleValidationAction() async {
+    // Handle profile completion (either from validation status or needsProfileCompletion)
+    if (_validationStatus == 'signup_required' || _needsProfileCompletion) {
+      // Navigate to signup screen
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const DriverSignupScreen()),
+      );
+      // Re-validate after returning from signup
+      _validateDriverAccess();
+      return;
+    }
+    
+    // Handle payment required
+    if (_validationStatus == 'payment_required') {
+      // Navigate to payment screen
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final user = authService.currentUser;
+      final userModel = await Provider.of<DatabaseService>(context, listen: false).getUserById(user!.uid);
+      
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PaymentScreen(
+            amount: 150.00,
+            email: userModel?.email ?? user.email ?? '',
+            onPaymentSuccess: () {
+              // Payment successful, re-validate
+              _validateDriverAccess();
+            },
+          ),
+        ),
+      );
+      return;
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this); // Remove lifecycle observer
     _fadeController.dispose();
     _slideController.dispose();
     _statusController.dispose();
     super.dispose();
+  }
+
+  // Periodic validation check (called when app comes to foreground)
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      // Removed _validateDriverAccess() - no need to re-validate when app comes to foreground
+      // This was causing unnecessary email verification and permission screens to show
+    }
   }
 
   @override
@@ -360,10 +725,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    if (_needsProfileCompletion) {
-      // If profile is incomplete, send them to the signup screen to fill it out
-      return const DriverSignupScreen();
-    }
+    // Don't immediately redirect to DriverSignupScreen - let the validation banner handle it
+    // This allows users to see the home screen with the validation banner
 
     return Scaffold(
       key: _scaffoldKey,
@@ -441,71 +804,235 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
               ),
             ),
 
-            // Incomplete Profile Card
-            if (_currentUser?.missingProfileFields.isNotEmpty ?? false) _buildIncompleteProfileCard(isDark),
-
-            // Welcome Alert Card
-            if (_showWelcomeAlert)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                child: Card(
-                  elevation: 8,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(20),
-                      gradient: LinearGradient(colors: [AppColors.primary, AppColors.primaryLight], begin: Alignment.topLeft, end: Alignment.bottomRight),
-                      boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.15), blurRadius: 24, offset: Offset(0, 8))],
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              // You can use a Lottie animation here if you want!
-                              Icon(Icons.celebration, color: AppColors.black, size: 32),
-                              const SizedBox(width: 12),
-                              Text(
-                                'Welcome!',
-                                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.primaryDark),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          Text(
-                            'Your first week is free. After that, you’ll pay R450 per week. You’ll receive a reminder to pay.',
-                            style: TextStyle(fontSize: 16, color: AppColors.textDark.withOpacity(0.85), fontWeight: FontWeight.w500),
-                          ),
-                          const SizedBox(height: 24),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: ElevatedButton(
-                              onPressed: _dismissWelcomeAlert,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppColors.black,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-                                elevation: 0,
-                              ),
-                              child: const Text('OK, got it', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
             // Main Content
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Column(
                   children: [
+                    // Approval Status Banner - Right under the header
+                    Builder(
+                      builder: (context) {
+                        final user = Provider.of<AuthService>(context).userModel;
+                        if (user?.isApproved != true)
+                          return FadeTransition(
+                            opacity: _fadeAnimation,
+                            child: Container(
+                              width: double.infinity,
+                              margin: const EdgeInsets.only(bottom: 16),
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withOpacity(0.1),
+                                border: Border.all(color: Colors.orange),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.pending, color: Colors.orange),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          'Account Under Review',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.orange,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Your account is awaiting approval. You\'ll be notified once approved.',
+                                          style: TextStyle(
+                                            color: Colors.orange.shade800,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        return const SizedBox.shrink();
+                      },
+                    ),
+
+                    // Validation Banner - for incomplete drivers
+                    if (_showValidationBanner || _needsProfileCompletion)
+                      FadeTransition(
+                        opacity: _fadeAnimation,
+                        child: Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.only(bottom: 16),
+                          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                AppColors.primary.withOpacity(0.1),
+                                AppColors.primary.withOpacity(0.05),
+                              ],
+                            ),
+                            border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.primary.withOpacity(0.1),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primary,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Icon(
+                                      (_validationStatus == 'signup_required' || _needsProfileCompletion)
+                                        ? Icons.person_add 
+                                        : Icons.payment,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          (_validationStatus == 'signup_required' || _needsProfileCompletion)
+                                            ? 'Complete Your Profile' 
+                                            : 'Payment Required',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                            color: AppColors.primary,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          _validationMessage ?? (_needsProfileCompletion 
+                                            ? 'Complete your driver profile to start earning' 
+                                            : ''),
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            color: isDark ? Colors.white70 : Colors.black87,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton(
+                                  onPressed: _handleValidationAction,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppColors.primary,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    (_validationStatus == 'signup_required' || _needsProfileCompletion)
+                                      ? 'Complete Profile' 
+                                      : 'Make Payment',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                    // Incomplete Profile Card
+                    FutureBuilder<bool>(
+                      future: _isPaymentRequired(),
+                      builder: (context, paymentSnapshot) {
+                        final isPaymentRequired = paymentSnapshot.data ?? false;
+                        final hasMissingFields = (_currentUser?.missingProfileFields.isNotEmpty ?? false);
+                        
+                        if (hasMissingFields || isPaymentRequired) {
+                          return _buildIncompleteProfileCard(isDark);
+                        }
+                        return const SizedBox.shrink();
+                      },
+                    ),
+
+                    // Welcome Alert Card
+                    if (_showWelcomeAlert)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        child: Card(
+                          elevation: 8,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(20),
+                              gradient: LinearGradient(colors: [AppColors.primary, AppColors.primaryLight], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                              boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.15), blurRadius: 24, offset: Offset(0, 8))],
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      // You can use a Lottie animation here if you want!
+                                      Icon(Icons.celebration, color: AppColors.black, size: 32),
+                                      const SizedBox(width: 12),
+                                      Text(
+                                        'Welcome!',
+                                        style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.primaryDark),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 14),
+                                  Text(
+                                    'Your first week is free. After that, you\'ll pay R450 per week. You\'ll receive a reminder to pay.',
+                                    style: TextStyle(fontSize: 16, color: AppColors.textDark.withOpacity(0.85), fontWeight: FontWeight.w500),
+                                  ),
+                                  const SizedBox(height: 24),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: ElevatedButton(
+                                      onPressed: _dismissWelcomeAlert,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppColors.black,
+                                        foregroundColor: Colors.white,
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                                        elevation: 0,
+                                      ),
+                                      child: const Text('OK, got it', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
                     // Status Card
                     FadeTransition(
                       opacity: _fadeAnimation,
@@ -628,13 +1155,115 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
   }
 
   Widget _buildIncompleteProfileCard(bool isDark) {
+    return FutureBuilder<bool>(
+      future: _isPaymentRequired(),
+      builder: (context, paymentSnapshot) {
+        final isPaymentRequired = paymentSnapshot.data ?? false;
+        final missingFields = _currentUser?.missingProfileFields ?? [];
+        final hasOtherMissingFields = missingFields.isNotEmpty;
+        
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          child: Card(
+            color: AppColors.warning.withOpacity(0.15),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(color: AppColors.warning, width: 1.5),
+            ),
+            elevation: 0,
+            child: Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 28),
+                      const SizedBox(width: 12),
+                      const Text('Profile Incomplete', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text('Please complete your profile to get approved. You are missing the following:', style: TextStyle(fontSize: 14, color: AppColors.getTextSecondaryColor(isDark))),
+                  const SizedBox(height: 12),
+                  // Show other missing fields
+                  ...missingFields.map(
+                    (field) => Padding(
+                      padding: const EdgeInsets.only(left: 8.0, bottom: 4.0),
+                      child: Row(
+                        children: [
+                          Icon(Icons.close, color: AppColors.error, size: 16),
+                          const SizedBox(width: 8),
+                          Text(field, style: const TextStyle(fontWeight: FontWeight.w500)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Show payment requirement in red if only payment is missing
+                  if (isPaymentRequired && !hasOtherMissingFields)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8.0, bottom: 4.0),
+                      child: Row(
+                        children: [
+                          Icon(Icons.close, color: AppColors.error, size: 16),
+                          const SizedBox(width: 8),
+                          Text('Payment Required', style: const TextStyle(fontWeight: FontWeight.w500, color: AppColors.error)),
+                        ],
+                      ),
+                    ),
+                  // Show payment requirement in red if other fields are also missing
+                  if (isPaymentRequired && hasOtherMissingFields)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8.0, bottom: 4.0),
+                      child: Row(
+                        children: [
+                          Icon(Icons.close, color: AppColors.error, size: 16),
+                          const SizedBox(width: 8),
+                          Text('Payment Required', style: const TextStyle(fontWeight: FontWeight.w500, color: AppColors.error)),
+                        ],
+                      ),
+                    ),
+                  const SizedBox(height: 20),
+                  CustomButton(
+                    text: isPaymentRequired && !hasOtherMissingFields ? 'Complete Payment' : 'Complete Your Profile',
+                    onPressed: () {
+                      if (isPaymentRequired && !hasOtherMissingFields) {
+                        Navigator.of(context).push(MaterialPageRoute(
+                          builder: (context) => PaymentScreen(
+                            amount: 150.0,
+                            email: _currentUser?.email ?? '',
+                            onPaymentSuccess: () {
+                              Navigator.of(context).pop();
+                              setState(() {
+                                // Refresh the UI after successful payment
+                              });
+                            },
+                          ),
+                        ));
+                      } else {
+                        Navigator.of(context).push(MaterialPageRoute(builder: (context) => const DriverSignupScreen()));
+                      }
+                    },
+                    icon: Icons.arrow_forward,
+                    color: AppColors.warning,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPaymentRequiredCard(bool isDark) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       child: Card(
-        color: AppColors.warning.withOpacity(0.15),
+        color: AppColors.error.withOpacity(0.15),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: AppColors.warning, width: 1.5),
+          side: BorderSide(color: AppColors.error, width: 1.5),
         ),
         elevation: 0,
         child: Padding(
@@ -644,34 +1273,31 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
             children: [
               Row(
                 children: [
-                  Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 28),
+                  Icon(Icons.payment, color: AppColors.error, size: 28),
                   const SizedBox(width: 12),
-                  const Text('Profile Incomplete', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  const Text('Payment Required', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 ],
               ),
               const SizedBox(height: 16),
-              Text('Please complete your profile to get approved. You are missing the following:', style: TextStyle(fontSize: 14, color: AppColors.getTextSecondaryColor(isDark))),
-              const SizedBox(height: 12),
-              ...(_currentUser?.missingProfileFields ?? []).map(
-                (field) => Padding(
-                  padding: const EdgeInsets.only(left: 8.0, bottom: 4.0),
-                  child: Row(
-                    children: [
-                      Icon(Icons.close, color: AppColors.error, size: 16),
-                      const SizedBox(width: 8),
-                      Text(field, style: const TextStyle(fontWeight: FontWeight.w500)),
-                    ],
-                  ),
-                ),
-              ),
+              Text('You need to complete payment to start earning as a driver. The registration fee is R150.', style: TextStyle(fontSize: 14, color: AppColors.getTextSecondaryColor(isDark))),
               const SizedBox(height: 20),
               CustomButton(
-                text: 'Complete Your Profile',
+                text: 'Pay Registration Fee',
                 onPressed: () {
-                  Navigator.of(context).push(MaterialPageRoute(builder: (context) => const DriverSignupScreen()));
+                  Navigator.of(context).push(MaterialPageRoute(
+                    builder: (context) => PaymentScreen(
+                      amount: 150.00,
+                      email: _currentUser?.email ?? '',
+                      onPaymentSuccess: () {
+                        Navigator.of(context).pop(); // Close payment screen
+                        // Refresh the page to hide the payment card
+                        setState(() {});
+                      },
+                    ),
+                  ));
                 },
-                icon: Icons.arrow_forward,
-                color: AppColors.warning,
+                icon: Icons.payment,
+                color: AppColors.error,
               ),
             ],
           ),
@@ -680,13 +1306,37 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
     );
   }
 
-  Widget _buildActionGrid(bool isDark) {
+  Widget _buildQuickActionsSection(bool isDark) {
     return GridView.count(
       crossAxisCount: 2,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
+      childAspectRatio: 1.1,
+      crossAxisSpacing: 16,
+      mainAxisSpacing: 16,
       children: [
-        _ActionCard(title: 'Ride Requests', subtitle: 'View available rides', icon: Icons.list_alt, color: AppColors.primary, onTap: _viewRideRequests, isDark: isDark),
+        Builder(
+          builder: (context) {
+            final user = Provider.of<AuthService>(context).userModel;
+            final isApproved = user?.isApproved == true;
+            return _ActionCard(
+              title: 'Ride Requests', 
+              subtitle: isApproved ? 'View available rides' : 'Awaiting approval', 
+              icon: Icons.list_alt, 
+              color: isApproved ? AppColors.primary : Colors.grey, 
+              onTap: _viewRideRequests, 
+              isDark: isDark,
+              isEnabled: isApproved,
+              gradient: isApproved 
+                ? LinearGradient(
+                    colors: [AppColors.primary.withOpacity(0.1), AppColors.primary.withOpacity(0.05)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  )
+                : null,
+            );
+          },
+        ),
         _ActionCard(
           title: 'Earnings',
           subtitle: 'View your earnings',
@@ -696,6 +1346,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EarningsScreen()));
           },
           isDark: isDark,
+          isEnabled: true,
+          gradient: LinearGradient(
+            colors: [AppColors.success.withOpacity(0.1), AppColors.success.withOpacity(0.05)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
         ),
       ],
     );
@@ -1148,8 +1804,19 @@ class _ActionCard extends StatefulWidget {
   final Color color;
   final VoidCallback onTap;
   final bool isDark;
+  final bool isEnabled;
+  final LinearGradient? gradient;
 
-  const _ActionCard({required this.title, required this.subtitle, required this.icon, required this.color, required this.onTap, required this.isDark});
+  const _ActionCard({
+    required this.title, 
+    required this.subtitle, 
+    required this.icon, 
+    required this.color, 
+    required this.onTap, 
+    required this.isDark,
+    this.isEnabled = true,
+    this.gradient,
+  });
 
   @override
   State<_ActionCard> createState() => _ActionCardState();
@@ -1175,43 +1842,172 @@ class _ActionCardState extends State<_ActionCard> with SingleTickerProviderState
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: widget.onTap, // Ensure tap triggers navigation
-      onTapDown: (_) => _controller.forward(),
-      onTapUp: (_) => _controller.reverse(),
-      onTapCancel: () => _controller.reverse(),
+      onTap: widget.isEnabled ? widget.onTap : null,
+      onTapDown: widget.isEnabled ? (_) => _controller.forward() : null,
+      onTapUp: widget.isEnabled ? (_) => _controller.reverse() : null,
+      onTapCancel: widget.isEnabled ? () => _controller.reverse() : null,
       child: AnimatedBuilder(
         animation: _scaleAnimation,
         builder: (context, child) {
           return Transform.scale(
-            scale: _scaleAnimation.value,
+            scale: widget.isEnabled ? _scaleAnimation.value : 1.0,
             child: Container(
-              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: AppColors.getCardColor(widget.isDark),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppColors.getBorderColor(widget.isDark), width: 1),
-                boxShadow: [BoxShadow(color: AppColors.getShadowColor(widget.isDark), blurRadius: 10, offset: const Offset(0, 4))],
-              ),
-              child: Column(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: widget.color.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
-                    child: Icon(widget.icon, color: widget.color, size: 32),
+                gradient: widget.gradient ?? LinearGradient(
+                  colors: widget.isEnabled 
+                    ? [
+                        AppColors.getCardColor(widget.isDark),
+                        AppColors.getCardColor(widget.isDark).withOpacity(0.8),
+                      ]
+                    : [
+                        Colors.grey.shade100,
+                        Colors.grey.shade50,
+                      ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: widget.isEnabled 
+                    ? widget.color.withOpacity(0.2)
+                    : Colors.grey.withOpacity(0.2), 
+                  width: 1.5
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: widget.isEnabled 
+                      ? widget.color.withOpacity(0.1)
+                      : Colors.grey.withOpacity(0.1),
+                    blurRadius: 15,
+                    offset: const Offset(0, 8),
+                    spreadRadius: 0,
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    widget.title,
-                    style: TextStyle(color: AppColors.getTextPrimaryColor(widget.isDark), fontSize: 16, fontWeight: FontWeight.w600),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    widget.subtitle,
-                    style: TextStyle(color: AppColors.getTextSecondaryColor(widget.isDark), fontSize: 12),
-                    textAlign: TextAlign.center,
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 5,
+                    offset: const Offset(0, 2),
                   ),
                 ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Stack(
+                  children: [
+                    // Background pattern for enabled cards
+                    if (widget.isEnabled)
+                      Positioned(
+                        top: -20,
+                        right: -20,
+                        child: Container(
+                          width: 60,
+                          height: 60,
+                          decoration: BoxDecoration(
+                            color: widget.color.withOpacity(0.05),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                    
+                    // Main content
+                    Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          // Icon container with modern design
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              gradient: widget.isEnabled 
+                                ? LinearGradient(
+                                    colors: [
+                                      widget.color.withOpacity(0.15),
+                                      widget.color.withOpacity(0.05),
+                                    ],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  )
+                                : LinearGradient(
+                                    colors: [
+                                      Colors.grey.withOpacity(0.1),
+                                      Colors.grey.withOpacity(0.05),
+                                    ],
+                                  ),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: widget.isEnabled 
+                                  ? widget.color.withOpacity(0.2)
+                                  : Colors.grey.withOpacity(0.2),
+                                width: 1,
+                              ),
+                            ),
+                            child: Icon(
+                              widget.icon, 
+                              color: widget.isEnabled ? widget.color : Colors.grey.shade400, 
+                              size: 32,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          
+                          // Title with modern typography
+                          Text(
+                            widget.title,
+                            style: TextStyle(
+                              color: widget.isEnabled 
+                                ? AppColors.getTextPrimaryColor(widget.isDark) 
+                                : Colors.grey.shade500, 
+                              fontSize: 18, 
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.5,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 6),
+                          
+                          // Subtitle with refined styling
+                          Text(
+                            widget.subtitle,
+                            style: TextStyle(
+                              color: widget.isEnabled 
+                                ? AppColors.getTextSecondaryColor(widget.isDark) 
+                                : Colors.grey.shade400, 
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              height: 1.3,
+                            ),
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          
+                          // Status indicator for disabled cards
+                          if (!widget.isEnabled) ...[
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: Colors.orange.withOpacity(0.3),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Text(
+                                'Pending',
+                                style: TextStyle(
+                                  color: Colors.orange.shade700,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           );

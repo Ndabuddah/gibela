@@ -21,7 +21,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 7, vsync: this);
   }
 
   @override
@@ -54,6 +54,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             Tab(text: 'Verifications'),
             Tab(text: 'Delete Requests'),
             Tab(text: 'Pricing'),
+            Tab(text: 'Payments'),
           ],
         ),
       ),
@@ -99,11 +100,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 const SizedBox(width: 12),
                 DropdownButton<String>(
                   value: _selectedFilter,
-                  items: const [
-                    DropdownMenuItem(value: 'all', child: Text('All')),
-                    DropdownMenuItem(value: 'approved', child: Text('Approved')),
-                    DropdownMenuItem(value: 'pending', child: Text('Pending')),
-                    DropdownMenuItem(value: 'rejected', child: Text('Rejected')),
+                  items: [
+                    const DropdownMenuItem(value: 'all', child: Text('All')),
+                    const DropdownMenuItem(value: 'approved', child: Text('Approved')),
+                    const DropdownMenuItem(value: 'pending', child: Text('Pending')),
+                    const DropdownMenuItem(value: 'rejected', child: Text('Rejected')),
+                    const DropdownMenuItem(value: 'paid', child: Text('Paid')),
+                    const DropdownMenuItem(value: 'unpaid', child: Text('Unpaid')),
                   ],
                   onChanged: (value) {
                     setState(() {
@@ -125,6 +128,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 _VerificationsTab(searchQuery: _searchQuery, filter: _selectedFilter),
                 _DeleteRequestsTab(searchQuery: _searchQuery, filter: _selectedFilter),
                 _PricingTab(),
+                _PaymentsTab(searchQuery: _searchQuery, filter: _selectedFilter),
               ],
             ),
           ),
@@ -1068,5 +1072,339 @@ class _InfoRow extends StatelessWidget {
         ],
       ),
     );
+  }
+} 
+
+// Payments Tab
+class _PaymentsTab extends StatelessWidget {
+  final String searchQuery;
+  final String filter;
+
+  const _PaymentsTab({required this.searchQuery, required this.filter});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .where('isDriver', isEqualTo: true)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(child: Text('Error: ${snapshot.error}'));
+        }
+
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final users = snapshot.data?.docs ?? [];
+        
+        // Filter users based on search query and payment status
+        final filteredUsers = users.where((user) {
+          final userData = user.data() as Map<String, dynamic>;
+          final name = userData['name']?.toString().toLowerCase() ?? '';
+          final email = userData['email']?.toString().toLowerCase() ?? '';
+          final phone = userData['phoneNumber']?.toString().toLowerCase() ?? '';
+          final searchLower = searchQuery.toLowerCase();
+          
+          // Check if user matches search query
+          final matchesSearch = searchQuery.isEmpty || 
+              name.contains(searchLower) || 
+              email.contains(searchLower) || 
+              phone.contains(searchLower);
+          
+          // Check payment status based on filter
+          bool matchesFilter = true;
+          if (filter == 'paid') {
+            matchesFilter = userData['paymentCompleted'] == true;
+          } else if (filter == 'unpaid') {
+            matchesFilter = userData['paymentCompleted'] != true;
+          }
+          
+          return matchesSearch && matchesFilter;
+        }).toList();
+
+        if (filteredUsers.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.payment, size: 64, color: Colors.grey[400]),
+                const SizedBox(height: 16),
+                Text(
+                  'No drivers found',
+                  style: TextStyle(
+                    fontSize: 18,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: filteredUsers.length,
+          itemBuilder: (context, index) {
+            final user = filteredUsers[index];
+            final userData = user.data() as Map<String, dynamic>;
+            final userId = user.id;
+            
+            return _PaymentCard(
+              userId: userId,
+              userData: userData,
+              searchQuery: searchQuery,
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+// Payment Card Widget
+class _PaymentCard extends StatelessWidget {
+  final String userId;
+  final Map<String, dynamic> userData;
+  final String searchQuery;
+
+  const _PaymentCard({
+    required this.userId,
+    required this.userData,
+    required this.searchQuery,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isPaid = userData['paymentCompleted'] == true;
+    
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 24,
+                  backgroundColor: Colors.grey[300],
+                  child: Text(
+                    (userData['name']?.toString().substring(0, 1).toUpperCase() ?? 'D'),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        userData['name']?.toString() ?? 'Unknown Driver',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.getTextPrimaryColor(isDark),
+                        ),
+                      ),
+                      Text(
+                        userData['email']?.toString() ?? '',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: AppColors.getTextSecondaryColor(isDark),
+                        ),
+                      ),
+                      Text(
+                        userData['phoneNumber']?.toString() ?? '',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: AppColors.getTextSecondaryColor(isDark),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isPaid ? Colors.green : Colors.orange,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    isPaid ? 'PAID' : 'UNPAID',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: isPaid ? null : () => _markAsPaid(context, userId),
+                    icon: const Icon(Icons.check_circle),
+                    label: const Text('Mark as Paid'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isPaid ? Colors.grey : Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => _viewPaymentDetails(context, userId),
+                    icon: const Icon(Icons.visibility),
+                    label: const Text('View Details'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _markAsPaid(BuildContext context, String userId) async {
+    try {
+      // Show confirmation dialog
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Confirm Payment'),
+          content: const Text('Are you sure you want to mark this driver\'s payment as completed?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Confirm'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) return;
+
+      // Update user document
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .update({
+        'paymentCompleted': true,
+        'paymentDate': FieldValue.serverTimestamp(),
+        'paymentMethod': 'manual_admin',
+      });
+
+      // Add payment record to driver_payments collection
+      await FirebaseFirestore.instance
+          .collection('driver_payments')
+          .add({
+        'userId': userId,
+        'amount': 150.00, // Default driver registration fee
+        'paymentMethod': 'manual_admin',
+        'status': 'completed',
+        'timestamp': FieldValue.serverTimestamp(),
+        'adminId': AuthService().currentUser?.uid,
+        'notes': 'Payment marked as completed by admin',
+      });
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Payment marked as completed successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _viewPaymentDetails(BuildContext context, String userId) async {
+    try {
+      final paymentDocs = await FirebaseFirestore.instance
+          .collection('driver_payments')
+          .where('userId', isEqualTo: userId)
+          .orderBy('timestamp', descending: true)
+          .get();
+
+      if (context.mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Payment History'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: paymentDocs.docs.isEmpty
+                  ? const Text('No payment records found.')
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: paymentDocs.docs.length,
+                      itemBuilder: (context, index) {
+                        final payment = paymentDocs.docs[index].data();
+                        return ListTile(
+                          title: Text('R${payment['amount']?.toString() ?? '0.00'}'),
+                          subtitle: Text(payment['paymentMethod']?.toString() ?? ''),
+                          trailing: Text(
+                            payment['timestamp'] != null
+                                ? DateTime.fromMillisecondsSinceEpoch(
+                                    payment['timestamp'].millisecondsSinceEpoch,
+                                  ).toString().substring(0, 16)
+                                : 'Unknown',
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 } 

@@ -159,7 +159,7 @@ class DatabaseService extends ChangeNotifier {
   }
 
   Stream<bool> isApprovedStream(String userId) {
-    return _firestore.collection('drivers').doc(userId).snapshots().map((snapshot) {
+    return _firestore.collection('users').doc(userId).snapshots().map((snapshot) {
       if (snapshot.exists) {
         return snapshot.data()?['isApproved'] ?? false;
       }
@@ -195,6 +195,10 @@ class DatabaseService extends ChangeNotifier {
       print('💾 DatabaseService: User name: ${user.name}');
       print('💾 DatabaseService: User surname: ${user.surname}');
       
+      print('💾 DatabaseService: Preparing user data with driver flags');
+      print('🚗 Is Driver: ${user.isDriver}');
+      
+      // Prepare user data with proper driver flags
       final userData = {
         'uid': user.uid,
         'email': user.email,
@@ -202,12 +206,18 @@ class DatabaseService extends ChangeNotifier {
         'surname': user.surname,
         'phoneNumber': user.phoneNumber,
         'isDriver': user.isDriver,
-        'isApproved': user.isApproved,
+        // Force isApproved to false for drivers, true for passengers
+        'isApproved': user.isDriver ? false : true,
+        // Set driver-specific flags
+        'requiresDriverSignup': user.isDriver ? true : false,
+        'driverProfileCompleted': false,
+        'driverSignupDate': user.isDriver ? null : null, // Will be set when signup is completed
+        'approvalStatus': user.isDriver ? 'pending_signup' : 'not_required', // Track driver status
         'savedAddresses': user.savedAddresses,
         'recentRides': user.recentRides,
         'isOnline': user.isOnline,
         'rating': user.rating,
-        'missingProfileFields': user.missingProfileFields,
+        'missingProfileFields': user.isDriver ? ['Driver Profile'] : user.missingProfileFields,
         'referrals': user.referrals,
         'referralAmount': user.referralAmount,
         'lastReferral': user.lastReferral?.toIso8601String(),
@@ -218,6 +228,11 @@ class DatabaseService extends ChangeNotifier {
       };
       
       print('💾 DatabaseService: User data prepared, saving to Firestore...');
+      print('🚗 DatabaseService: Driver flags:');
+      print('   - isDriver: ${userData['isDriver']}');
+      print('   - isApproved: ${userData['isApproved']}');
+      print('   - requiresDriverSignup: ${userData['requiresDriverSignup']}');
+      print('   - driverProfileCompleted: ${userData['driverProfileCompleted']}');
       await _usersCollection.doc(user.uid).set(userData);
       print('✅ DatabaseService: User created successfully in Firestore');
     } catch (e) {
@@ -255,6 +270,17 @@ class DatabaseService extends ChangeNotifier {
   // Create a driver profile
   Future<void> createDriverProfile(DriverModel driver) async {
     try {
+      // Verify that the user exists and is marked as a driver
+      final userDoc = await _usersCollection.doc(driver.userId).get();
+      if (!userDoc.exists) {
+        throw Exception('User does not exist');
+      }
+
+      final userData = userDoc.data() as Map<String, dynamic>;
+      if (!userData['isDriver']) {
+        throw Exception('User is not registered as a driver');
+      }
+
       // Create or update the driver profile document
       await _driversCollection.doc(driver.userId).set(driver.toMap());
 
@@ -267,7 +293,9 @@ class DatabaseService extends ChangeNotifier {
       if (driver.licensePlate == null || driver.licensePlate!.isEmpty) missingFields.add('License Plate');
       if (driver.documents.isEmpty) missingFields.add('Required Documents');
 
-      // Create or update user document to mark as driver and ensure all required fields are present
+      print('📝 Updating user document with completed driver profile');
+      
+      // Update user document with driver information
       await _usersCollection.doc(driver.userId).set({
         'uid': driver.userId,
         'email': driver.email,
@@ -275,15 +303,20 @@ class DatabaseService extends ChangeNotifier {
         'surname': '', // Default empty surname
         'phoneNumber': driver.phoneNumber,
         'isDriver': true,
-        'isApproved': false, // Drivers need approval
+        'isApproved': false, // Always false until manually approved
+        'requiresDriverSignup': false, // Mark driver signup as completed
+        'driverProfileCompleted': true,
+        'driverSignupDate': FieldValue.serverTimestamp(),
+        'approvalStatus': 'awaiting_approval', // Update status to awaiting approval
         'savedAddresses': [],
         'recentRides': [],
         'isOnline': false,
         'IsFemale': driver.isFemale ?? false,
         'IsForStudents': driver.isForStudents ?? false,
         'missingProfileFields': missingFields,
-        'profileImage': driver.profileImage, // <-- Ensure this is always set
-      }, SetOptions(merge: true)); // Use merge to avoid errors on non-existing documents
+        'profileImage': driver.profileImage,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
     } catch (e) {
       print('Error creating driver profile: $e'); // Optional: Log the error
       rethrow; // Rethrow if you want to handle it further up the stack
@@ -435,6 +468,8 @@ class DatabaseService extends ChangeNotifier {
         body: 'Your driver has cancelled the ride. Looking for another driver...',
         timestamp: Timestamp.fromDate(now),
         isRead: false,
+        category: NotificationCategory.ride,
+        priority: NotificationPriority.high,
       );
       
       print('Creating notification: ${notification.toMap()}'); // Debug log
@@ -605,16 +640,37 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
+  // Check if user needs to complete driver signup
+  Future<bool> needsDriverSignup(String userId) async {
+    try {
+      final userDoc = await _usersCollection.doc(userId).get();
+      if (!userDoc.exists) {
+        return false;
+      }
+
+      final userData = userDoc.data() as Map<String, dynamic>;
+      return userData['isDriver'] == true && 
+             (userData['requiresDriverSignup'] == true || 
+              userData['driverProfileCompleted'] != true);
+    } catch (e) {
+      print('Error checking driver signup status: $e');
+      return false;
+    }
+  }
+
   // Set isOnline for driver
   Future<void> setDriverOnlineStatus(String driverId, bool isOnline) async {
     try {
       final docRef = _driversCollection.doc(driverId);
       final doc = await docRef.get();
       if (doc.exists) {
-        await docRef.update({'isOnline': isOnline});
+        // Use the correct status field instead of isOnline
+        final status = isOnline ? DriverStatus.online : DriverStatus.offline;
+        await docRef.update({'status': status.index});
       } else {
-        // Create a minimal driver document with isOnline field
-        await docRef.set({'isOnline': isOnline});
+        // Create a minimal driver document with correct status field
+        final status = isOnline ? DriverStatus.online : DriverStatus.offline;
+        await docRef.set({'status': status.index});
       }
     } catch (e) {
       rethrow;
@@ -1065,6 +1121,13 @@ class DatabaseService extends ChangeNotifier {
       if (referralQuery.docs.isNotEmpty) {
         final referralDoc = referralQuery.docs.first;
         final referralData = referralDoc.data();
+        
+        // Verify this is a driver referral
+        if (!(referralData['isDriverReferral'] ?? false)) {
+          print('❌ Not a driver referral, skipping completion');
+          return;
+        }
+        
         final referrerId = referralData['referrerId'] as String;
 
         // Update referral status to completed
@@ -1077,11 +1140,11 @@ class DatabaseService extends ChangeNotifier {
         await sendNotification(
           userId: referrerId,
           title: 'Referral Completed!',
-          message: 'Your referral has been approved! You earned R15.',
+          message: 'Your referral has been approved! You earned R50.',
           type: 'referral_completed',
           data: {
             'driverId': driverId,
-            'amount': 15.0,
+            'amount': 50.0,
           },
         );
 
@@ -1141,6 +1204,100 @@ class DatabaseService extends ChangeNotifier {
     } catch (e) {
       print('Error updating user owing: $e');
       rethrow;
+    }
+  }
+
+  // Record successful payment for driver
+  Future<void> recordDriverPayment(String driverId, double amount, String paymentReference) async {
+    try {
+      await _firestore.collection('driver_payments').add({
+        'driverId': driverId,
+        'amount': amount,
+        'paymentReference': paymentReference,
+        'status': 'success',
+        'timestamp': FieldValue.serverTimestamp(),
+        'validUntil': FieldValue.serverTimestamp(), // Will be set to 7 days from now
+      });
+      
+      // Update user document to mark payment as completed
+      await _usersCollection.doc(driverId).update({
+        'paymentCompleted': true,
+        'lastPaymentDate': FieldValue.serverTimestamp(),
+      });
+      
+      print('✅ Payment recorded successfully for driver: $driverId');
+    } catch (e) {
+      print('Error recording payment: $e');
+      rethrow;
+    }
+  }
+
+  // Verify payment status for driver
+  Future<bool> verifyDriverPayment(String driverId) async {
+    try {
+      // First check if user has paymentCompleted flag
+      final userDoc = await _usersCollection.doc(driverId).get();
+      if (userDoc.exists) {
+        final userData = userDoc.data() as Map<String, dynamic>?;
+        if (userData?['paymentCompleted'] == true) {
+          print('✅ Payment verified via user document flag');
+          return true;
+        }
+      }
+      
+      // Fallback: check driver_payments collection
+      final paymentsQuery = await _firestore
+          .collection('driver_payments')
+          .where('driverId', isEqualTo: driverId)
+          .where('status', isEqualTo: 'success')
+          .orderBy('timestamp', descending: true)
+          .limit(1)
+          .get();
+
+      final hasPayment = paymentsQuery.docs.isNotEmpty;
+      print('Payment verification result: $hasPayment');
+      return hasPayment;
+    } catch (e) {
+      print('Error verifying payment: $e');
+      return false;
+    }
+  }
+
+  // Save driver signup progress
+  Future<void> saveDriverSignupProgress(String userId, Map<String, dynamic> progressData) async {
+    try {
+      await _firestore.collection('driver_signup_progress').doc(userId).set({
+        ...progressData,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      });
+      print('✅ Driver signup progress saved for user: $userId');
+    } catch (e) {
+      print('Error saving driver signup progress: $e');
+      rethrow;
+    }
+  }
+
+  // Get driver signup progress
+  Future<Map<String, dynamic>?> getDriverSignupProgress(String userId) async {
+    try {
+      final doc = await _firestore.collection('driver_signup_progress').doc(userId).get();
+      if (doc.exists) {
+        return doc.data();
+      }
+      return null;
+    } catch (e) {
+      print('Error getting driver signup progress: $e');
+      return null;
+    }
+  }
+
+  // Clear driver signup progress (called after successful submission)
+  Future<void> clearDriverSignupProgress(String userId) async {
+    try {
+      await _firestore.collection('driver_signup_progress').doc(userId).delete();
+      print('✅ Driver signup progress cleared for user: $userId');
+    } catch (e) {
+      print('Error clearing driver signup progress: $e');
     }
   }
 }
