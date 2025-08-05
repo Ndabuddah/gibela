@@ -1,5 +1,7 @@
 enum DriverStatus { offline, online, onRide }
 
+enum PaymentModel { weekly, percentage }
+
 class DriverModel {
   final String userId;
   final String idNumber;
@@ -24,6 +26,10 @@ class DriverModel {
   final bool? isLuxury;
   final bool? isMax2;
   final List<String> vehiclePurposes;
+  final bool payLater;
+  final PaymentModel paymentModel;
+  final bool isPaid;
+  final DateTime? lastPaymentModelChange;
   
   // New fields for enhanced profile management
   final Map<String, bool> documentVerificationStatus;
@@ -58,6 +64,10 @@ class DriverModel {
     this.isLuxury,
     this.isMax2,
     this.vehiclePurposes = const [],
+    this.payLater = false,
+    this.paymentModel = PaymentModel.weekly,
+    this.isPaid = false,
+    this.lastPaymentModelChange,
     this.documentVerificationStatus = const {},
     this.documentExpiryDates = const {},
     this.vehicleInformation = const {},
@@ -113,6 +123,12 @@ class DriverModel {
       isLuxury: data['isLuxury'],
       isMax2: data['isMax2'] ?? false,
       vehiclePurposes: (data['vehiclePurposes'] as List<dynamic>?)?.cast<String>() ?? [],
+      payLater: data['payLater'] ?? false,
+      paymentModel: PaymentModel.values.asMap().containsKey(data['paymentModel'])
+          ? PaymentModel.values[data['paymentModel']]
+          : PaymentModel.weekly,
+      isPaid: data['isPaid'] ?? false,
+      lastPaymentModelChange: data['lastPaymentModelChange'] != null ? DateTime.parse(data['lastPaymentModelChange'] as String) : null,
       documentVerificationStatus: verificationStatus,
       documentExpiryDates: expiryDates,
       vehicleInformation: data['vehicleInformation'] as Map<String, dynamic>? ?? {},
@@ -148,6 +164,17 @@ class DriverModel {
       'IsForStudents': isForStudents,
       'isLuxury': isLuxury,
       'isMax2': isMax2,
+      'payLater': payLater,
+      'paymentModel': paymentModel.index,
+      'isPaid': isPaid,
+      'lastPaymentModelChange': lastPaymentModelChange?.toIso8601String(),
+      'documentVerificationStatus': documentVerificationStatus,
+      'documentExpiryDates': documentExpiryDates.map((key, value) => MapEntry(key, value.toIso8601String())),
+      'vehicleInformation': vehicleInformation,
+      'serviceAreaPreferences': serviceAreaPreferences,
+      'workingHours': workingHours,
+      'driverPreferences': driverPreferences,
+      'profileCompletionPercentage': profileCompletionPercentage,
     };
   }
 
@@ -175,6 +202,17 @@ class DriverModel {
     bool? isLuxury,
     bool? isMax2,
     List<String>? vehiclePurposes,
+    bool? payLater,
+    PaymentModel? paymentModel,
+    bool? isPaid,
+    DateTime? lastPaymentModelChange,
+    Map<String, bool>? documentVerificationStatus,
+    Map<String, DateTime>? documentExpiryDates,
+    Map<String, dynamic>? vehicleInformation,
+    Map<String, List<String>>? serviceAreaPreferences,
+    Map<String, List<String>>? workingHours,
+    Map<String, dynamic>? driverPreferences,
+    double? profileCompletionPercentage,
   }) {
     return DriverModel(
       userId: userId ?? this.userId,
@@ -195,11 +233,22 @@ class DriverModel {
       totalEarnings: totalEarnings ?? this.totalEarnings,
       isApproved: isApproved ?? this.isApproved,
       profileImage: profileImage ?? this.profileImage,
-            isFemale: isFemale ?? this.isFemale,
+      isFemale: isFemale ?? this.isFemale,
       isForStudents: isForStudents ?? this.isForStudents,
       isLuxury: isLuxury ?? this.isLuxury,
       isMax2: isMax2 ?? this.isMax2,
       vehiclePurposes: vehiclePurposes ?? this.vehiclePurposes,
+      payLater: payLater ?? this.payLater,
+      paymentModel: paymentModel ?? this.paymentModel,
+      isPaid: isPaid ?? this.isPaid,
+      lastPaymentModelChange: lastPaymentModelChange ?? this.lastPaymentModelChange,
+      documentVerificationStatus: documentVerificationStatus ?? this.documentVerificationStatus,
+      documentExpiryDates: documentExpiryDates ?? this.documentExpiryDates,
+      vehicleInformation: vehicleInformation ?? this.vehicleInformation,
+      serviceAreaPreferences: serviceAreaPreferences ?? this.serviceAreaPreferences,
+      workingHours: workingHours ?? this.workingHours,
+      driverPreferences: driverPreferences ?? this.driverPreferences,
+      profileCompletionPercentage: profileCompletionPercentage ?? this.profileCompletionPercentage,
     );
   }
 }

@@ -53,7 +53,7 @@ class HelpScreen extends StatelessWidget {
                   const Text('Frequently Asked Questions', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 18),
                   _faqCard(Icons.chat_bubble_outline, 'How do I contact support?', 'You can contact us via WhatsApp, email, or phone using the buttons below.'),
-                  _faqCard(Icons.attach_money, 'How are driver earnings calculated?', 'Drivers earn the full fare minus a weekly platform fee and card payment processing fees.'),
+                  _faqCard(Icons.attach_money, 'How are driver earnings calculated?', 'Drivers earn the full fare minus a weekly platform fee.'),
                   _faqCard(Icons.delete_forever, 'How do I delete my account?', 'Go to Settings > Delete Account.'),
                   _faqCard(Icons.payments, 'When are payouts made?', 'Weekly payouts are made every Sunday.'),
                 ],

@@ -38,21 +38,30 @@ class DriverAccessService {
         };
       }
 
-      // Check payment status FIRST - even if profile is complete, payment is required
-      final paymentsQuery = await _firestore
-          .collection('driver_payments')
-          .where('driverId', isEqualTo: userId)
-          .where('status', isEqualTo: 'success')
-          .orderBy('timestamp', descending: true)
-          .limit(1)
-          .get();
+      // Check if driver has chosen pay-later first
+      bool isPayLater = false;
+      if (driverDoc.exists) {
+        final driverData = driverDoc.data() as Map<String, dynamic>;
+        isPayLater = driverData['payLater'] ?? false;
+      }
+      
+      // Only check payment if driver is not using pay-later
+      if (!isPayLater) {
+        final paymentsQuery = await _firestore
+            .collection('driver_payments')
+            .where('driverId', isEqualTo: userId)
+            .where('status', isEqualTo: 'success')
+            .orderBy('timestamp', descending: true)
+            .limit(1)
+            .get();
 
-      if (paymentsQuery.docs.isEmpty) {
-        return {
-          'canAccess': false,
-          'reason': 'Payment required',
-          'status': 'payment_required',
-        };
+        if (paymentsQuery.docs.isEmpty) {
+          return {
+            'canAccess': false,
+            'reason': 'Payment required',
+            'status': 'payment_required',
+          };
+        }
       }
 
       // Check if driver signup is required
@@ -125,6 +134,18 @@ class DriverAccessService {
   // Check if payment is required
   Future<bool> isPaymentRequired(String userId) async {
     try {
+      // First check if driver has chosen pay-later
+      final driverDoc = await _firestore.collection('drivers').doc(userId).get();
+      if (driverDoc.exists) {
+        final driverData = driverDoc.data() as Map<String, dynamic>;
+        final payLater = driverData['payLater'] ?? false;
+        
+        // If driver chose pay-later, payment is not required upfront
+        if (payLater) {
+          return false;
+        }
+      }
+      
       final paymentsQuery = await _firestore
           .collection('driver_payments')
           .where('driverId', isEqualTo: userId)

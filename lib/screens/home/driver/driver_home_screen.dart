@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:gibelbibela/models/driver_model.dart';
 import 'package:gibelbibela/models/notification_model.dart';
+import 'package:gibelbibela/models/ride_model.dart';
 import 'package:gibelbibela/models/user_model.dart';
 import 'package:gibelbibela/screens/auth/login_screen.dart';
 import 'package:gibelbibela/screens/driver/ride_history_screen.dart' as driver_history;
@@ -93,15 +94,25 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
 
   Future<void> _fetchDriver() async {
     try {
+      print('🔄 Fetching driver data...');
       final driver = await DatabaseService().getCurrentDriver();
       if (mounted) {
         setState(() {
           _driver = driver;
           _loading = false;
         });
+        print('✅ Driver data loaded:');
+        print('- Driver exists: ${driver != null}');
+        if (driver != null) {
+          print('- Name: ${driver.name}');
+          print('- Pay Later: ${driver.payLater}');
+          print('- Documents: ${driver.documents.length}');
+          print('- Vehicle Type: ${driver.vehicleType}');
+          print('- Profile Complete: ${!_needsProfileCompletion}');
+        }
       }
     } catch (e) {
-      print('Error fetching driver: $e');
+      print('❌ Error fetching driver: $e');
       if (mounted) {
         setState(() {
           _loading = false;
@@ -111,8 +122,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
   }
 
   bool get _needsProfileCompletion {
+    // If still loading, don't show profile completion requirement yet
+    if (_loading) {
+      return false;
+    }
+    
     if (_driver == null) {
-      // If the driver object itself is null, profile is definitely incomplete.
+      // If the driver object itself is null after loading, profile is incomplete
       return true;
     }
     
@@ -145,6 +161,23 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return true;
       
+      // First check if driver has chosen "Pay Later"
+      final driver = await FirebaseFirestore.instance
+          .collection('drivers')
+          .doc(user.uid)
+          .get();
+      
+      if (driver.exists) {
+        final driverData = driver.data() as Map<String, dynamic>;
+        final payLater = driverData['payLater'] ?? false;
+        
+        // If driver chose "Pay Later", they don't need to pay upfront
+        if (payLater) {
+          return false;
+        }
+      }
+      
+      // Check for successful payments
       final paymentsQuery = await FirebaseFirestore.instance
           .collection('driver_payments')
           .where('driverId', isEqualTo: user.uid)
@@ -157,6 +190,28 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
     } catch (e) {
       print('Error checking payment status: $e');
       return true; // Assume payment is required if there's an error
+    }
+  }
+
+  // Check if driver is using pay-later
+  Future<bool> _isPayLater() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return false;
+      
+      final driver = await FirebaseFirestore.instance
+          .collection('drivers')
+          .doc(user.uid)
+          .get();
+      
+      if (driver.exists) {
+        final driverData = driver.data() as Map<String, dynamic>;
+        return driverData['payLater'] ?? false;
+      }
+      return false;
+    } catch (e) {
+      print('Error checking pay-later status: $e');
+      return false;
     }
   }
 
@@ -684,7 +739,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
       await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => PaymentScreen(
-            amount: 150.00,
+            amount: 100.00,
             email: userModel?.email ?? user.email ?? '',
             onPaymentSuccess: () {
               // Payment successful, re-validate
@@ -964,13 +1019,27 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
                       ),
 
                     // Incomplete Profile Card
-                    FutureBuilder<bool>(
-                      future: _isPaymentRequired(),
-                      builder: (context, paymentSnapshot) {
-                        final isPaymentRequired = paymentSnapshot.data ?? false;
+                    FutureBuilder<Map<String, bool>>(
+                      future: Future.wait([
+                        _isPaymentRequired(),
+                        _isPayLater(),
+                      ]).then((results) => {
+                        'isPaymentRequired': results[0],
+                        'isPayLater': results[1],
+                      }),
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState == ConnectionState.waiting) {
+                          return const SizedBox.shrink();
+                        }
+                        
+                        final isPaymentRequired = snapshot.data?['isPaymentRequired'] ?? false;
+                        final isPayLater = snapshot.data?['isPayLater'] ?? false;
                         final hasMissingFields = (_currentUser?.missingProfileFields.isNotEmpty ?? false);
                         
-                        if (hasMissingFields || isPaymentRequired) {
+                        // Show card only if:
+                        // 1. There are missing fields (regardless of payment model), OR
+                        // 2. Payment is required AND user is not using pay-later
+                        if (hasMissingFields || (isPaymentRequired && !isPayLater)) {
                           return _buildIncompleteProfileCard(isDark);
                         }
                         return const SizedBox.shrink();
@@ -1279,14 +1348,14 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
                 ],
               ),
               const SizedBox(height: 16),
-              Text('You need to complete payment to start earning as a driver. The registration fee is R150.', style: TextStyle(fontSize: 14, color: AppColors.getTextSecondaryColor(isDark))),
+                                            Text('You need to complete payment to start earning as a driver. The registration fee is R100.', style: TextStyle(fontSize: 14, color: AppColors.getTextSecondaryColor(isDark))),
               const SizedBox(height: 20),
               CustomButton(
                 text: 'Pay Registration Fee',
                 onPressed: () {
                   Navigator.of(context).push(MaterialPageRoute(
                     builder: (context) => PaymentScreen(
-                      amount: 150.00,
+                      amount: 100.00,
                       email: _currentUser?.email ?? '',
                       onPaymentSuccess: () {
                         Navigator.of(context).pop(); // Close payment screen
@@ -1387,8 +1456,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
             : Column(
                 children: _recentRides.map((ride) {
                   final status = ride['status'];
-                  final isCompleted = status == 2;
-                  final isCancelled = status == 3;
+                  final isCompleted = status == RideStatus.completed.index;
+                  final isCancelled = status == RideStatus.cancelled.index;
                   final fare = isCompleted ? ride['fare'] : 0.0;
                   final date = ride['date'] != null ? DateTime.fromMillisecondsSinceEpoch(ride['date']) : null;
                   return Card(

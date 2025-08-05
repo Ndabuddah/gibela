@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../constants/app_colors.dart';
 import '../../data/mock_ride_history.dart'; // Import mock data
+import '../../models/ride_model.dart';
 
 class RideHistoryScreen extends StatelessWidget {
   const RideHistoryScreen({Key? key}) : super(key: key);
@@ -75,8 +76,8 @@ class RideHistoryScreen extends StatelessWidget {
     final pickup = ride['pickupAddress'] as String? ?? 'Unknown Pickup';
     final destination = ride['destinationAddress'] as String? ?? 'Unknown Destination';
 
-    final isCompleted = status == 2;
-    final isCancelled = status == 3;
+    final isCompleted = status == RideStatus.completed.index;
+    final isCancelled = status == RideStatus.cancelled.index;
 
     final color = isCompleted
         ? Colors.green

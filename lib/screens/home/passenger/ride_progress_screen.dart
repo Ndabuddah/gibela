@@ -390,9 +390,39 @@ class _RideProgressScreenState extends State<RideProgressScreen>
     }
 
     try {
-      // Get driver information
-      final driver = await _databaseService.getUserById(_currentRide!.driverId!);
-      if (driver == null) {
+      // Get driver information - try driver collection first, then user collection
+      DriverModel? driverModel = await _databaseService.getDriverByUserId(_currentRide!.driverId!);
+      UserModel? driverUser;
+      
+      if (driverModel != null) {
+        // Convert DriverModel to UserModel for chat
+        driverUser = UserModel(
+          uid: driverModel.userId,
+          email: driverModel.email,
+          name: driverModel.name,
+          surname: '', // Driver model doesn't have surname
+          phoneNumber: driverModel.phoneNumber,
+          isDriver: true,
+          isApproved: driverModel.isApproved,
+          savedAddresses: const [],
+          recentRides: const [],
+          isOnline: driverModel.status == DriverStatus.online,
+          rating: driverModel.averageRating,
+          missingProfileFields: const [],
+          referrals: 0,
+          referralAmount: 0.0,
+          lastReferral: null,
+          isGirl: driverModel.isFemale ?? false,
+          isStudent: driverModel.isForStudents ?? false,
+          profileImage: driverModel.profileImage,
+          photoUrl: driverModel.profileImage,
+        );
+      } else {
+        // Fallback to user collection
+        driverUser = await _databaseService.getUserById(_currentRide!.driverId!);
+      }
+      
+      if (driverUser == null) {
         ModernSnackBar.show(
           context,
           message: 'Driver information not found',
@@ -415,12 +445,12 @@ class _RideProgressScreenState extends State<RideProgressScreen>
       final chatId = participants.join('_');
 
       // Navigate to chat screen
-      if (mounted) {
+      if (mounted && driverUser != null) {
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (context) => ChatScreen(
               chatId: chatId,
-              receiver: driver,
+              receiver: driverUser!,
               currentUserId: currentUser.uid,
             ),
           ),

@@ -84,7 +84,7 @@ class AddressCacheService {
       final placemarks = await placemarkFromCoordinates(lat, lng);
       if (placemarks.isNotEmpty) {
         final place = placemarks.first;
-        final address = _formatAddress(place);
+        final address = _formatAddress(place, lat: lat, lng: lng);
         
         // Cache the result
         _cache[cacheKey] = {
@@ -110,7 +110,7 @@ class AddressCacheService {
   }
 
   // Format address from Placemark
-  String _formatAddress(Placemark place) {
+  String _formatAddress(Placemark place, {double? lat, double? lng}) {
     final parts = <String>[];
     
     if (place.street?.isNotEmpty == true) parts.add(place.street!);
@@ -119,7 +119,10 @@ class AddressCacheService {
     
     if (parts.isEmpty) {
       // Fallback to coordinates if no address parts available
-      return '${place.latitude?.toStringAsFixed(4)}, ${place.longitude?.toStringAsFixed(4)}';
+      if (lat != null && lng != null) {
+        return '${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}';
+      }
+      return 'Unknown Location';
     }
     
     return parts.join(', ');

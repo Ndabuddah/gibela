@@ -147,7 +147,7 @@ class DatabaseService extends ChangeNotifier {
     try {
       final User? firebaseUser = _auth.currentUser;
       if (firebaseUser != null) {
-        final DocumentSnapshot doc = await _usersCollection.doc(firebaseUser.uid).get();
+        final DocumentSnapshot doc = await _driversCollection.doc(firebaseUser.uid).get();
         if (doc.exists) {
           return DriverModel.fromMap(doc.data() as Map<String, dynamic>);
         }
@@ -270,6 +270,8 @@ class DatabaseService extends ChangeNotifier {
   // Create a driver profile
   Future<void> createDriverProfile(DriverModel driver) async {
     try {
+      print('🚗 Creating driver profile for: ${driver.name}');
+      
       // Verify that the user exists and is marked as a driver
       final userDoc = await _usersCollection.doc(driver.userId).get();
       if (!userDoc.exists) {
@@ -295,8 +297,8 @@ class DatabaseService extends ChangeNotifier {
 
       print('📝 Updating user document with completed driver profile');
       
-      // Update user document with driver information
-      await _usersCollection.doc(driver.userId).set({
+      // Update user document with comprehensive driver information
+      final userUpdates = {
         'uid': driver.userId,
         'email': driver.email,
         'name': driver.name,
@@ -316,10 +318,25 @@ class DatabaseService extends ChangeNotifier {
         'missingProfileFields': missingFields,
         'profileImage': driver.profileImage,
         'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+        // Add payment-related flags
+        'payLater': driver.payLater,
+        'paymentModel': driver.paymentModel.index,
+        'isPaid': driver.isPaid,
+        'lastPaymentModelChange': driver.lastPaymentModelChange?.toIso8601String(),
+      };
+      
+      await _usersCollection.doc(driver.userId).set(userUpdates, SetOptions(merge: true));
+      
+      print('✅ Driver profile created successfully');
+      print('- Driver ID: ${driver.userId}');
+      print('- Name: ${driver.name}');
+      print('- Pay Later: ${driver.payLater}');
+      print('- Documents: ${driver.documents.length}');
+      print('- Missing Fields: ${missingFields.length}');
+      
     } catch (e) {
-      print('Error creating driver profile: $e'); // Optional: Log the error
-      rethrow; // Rethrow if you want to handle it further up the stack
+      print('❌ Error creating driver profile: $e');
+      rethrow;
     }
   }
 
@@ -350,6 +367,28 @@ class DatabaseService extends ChangeNotifier {
     try {
       await _driversCollection.doc(driverId).update({
         'status': status.index,
+      });
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Update driver payment model
+  Future<void> updateDriverPaymentModel(String driverId, PaymentModel paymentModel) async {
+    try {
+      await _driversCollection.doc(driverId).update({
+        'paymentModel': paymentModel.index,
+      });
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Reset driver's isPaid flag when new earnings are added
+  Future<void> resetDriverPaymentStatus(String driverId) async {
+    try {
+      await _driversCollection.doc(driverId).update({
+        'isPaid': false,
       });
     } catch (e) {
       rethrow;
@@ -687,17 +726,27 @@ class DatabaseService extends ChangeNotifier {
         await _ridesCollection.where('driverId', isEqualTo: driverId).where('status', isEqualTo: RideStatus.completed.index).where('dropoffTime', isGreaterThanOrEqualTo: startOfDay.millisecondsSinceEpoch).where('dropoffTime', isLessThanOrEqualTo: endOfDay.millisecondsSinceEpoch).get();
 
     double totalEarnings = 0.0;
+    double cardEarnings = 0.0;
     int rideCount = 0;
 
     for (var doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
       final fare = (data['actualFare'] ?? data['estimatedFare'] ?? 0).toDouble();
+      final paymentType = data['paymentType'] as String? ?? 'Cash';
+      
       totalEarnings += fare;
       rideCount++;
+      
+      // Calculate card earnings with 6.5% processing fee deduction
+      if (paymentType == 'Card') {
+        final cardFare = fare * (1 - 0.065); // Deduct 6.5% processing fee
+        cardEarnings += cardFare;
+      }
     }
 
     return {
       'earnings': totalEarnings,
+      'cardEarnings': cardEarnings,
       'rides': rideCount,
     };
   }
@@ -719,17 +768,27 @@ class DatabaseService extends ChangeNotifier {
         await _ridesCollection.where('driverId', isEqualTo: driverId).where('status', isEqualTo: RideStatus.completed.index).where('dropoffTime', isGreaterThanOrEqualTo: start.millisecondsSinceEpoch).where('dropoffTime', isLessThanOrEqualTo: end.millisecondsSinceEpoch).get();
 
     double totalEarnings = 0.0;
+    double cardEarnings = 0.0;
     int rideCount = 0;
 
     for (var doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
       final fare = (data['actualFare'] ?? data['estimatedFare'] ?? 0).toDouble();
+      final paymentType = data['paymentType'] as String? ?? 'Cash';
+      
       totalEarnings += fare;
       rideCount++;
+      
+      // Calculate card earnings with 6.5% processing fee deduction
+      if (paymentType == 'Card') {
+        final cardFare = fare * (1 - 0.065); // Deduct 6.5% processing fee
+        cardEarnings += cardFare;
+      }
     }
 
     return {
       'earnings': totalEarnings,
+      'cardEarnings': cardEarnings,
       'rides': rideCount,
     };
   }
@@ -1003,12 +1062,13 @@ class DatabaseService extends ChangeNotifier {
         'completedAt': now.millisecondsSinceEpoch,
       });
 
-      // Update driver's total earnings
+      // Update driver's total earnings and reset payment status
       final driverRef = _driversCollection.doc(driverId);
       batch.update(driverRef, {
         'totalEarnings': FieldValue.increment(actualFare),
         'totalRides': FieldValue.increment(1),
         'status': DriverStatus.online.index, // Set driver back to online
+        'isPaid': false, // Reset payment status when new earnings are added
       });
 
       // Create notification for passenger

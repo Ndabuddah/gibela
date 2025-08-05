@@ -18,6 +18,7 @@ import '../../widgets/common/custom_button.dart';
 import '../../widgets/common/custom_text_field.dart';
 import '../../widgets/common/loading_indicator.dart';
 import '../../widgets/driver/document_upload.dart';
+import '../../utils/validators.dart';
 import 'congratulations_screen.dart';
 
 class DriverSignupScreen extends StatefulWidget {
@@ -224,7 +225,19 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
   // Track saved document paths for progress restoration
   Map<String, String> _documentPaths = {};
 
+  // Enhanced loading state management
   bool _isLoading = false;
+  String _loadingMessage = '';
+  
+  void _setLoading(bool loading, {String message = ''}) {
+    if (mounted) {
+      setState(() {
+        _isLoading = loading;
+        _loadingMessage = message;
+      });
+    }
+  }
+
   bool _showThankYou = false;
   
   // Payment verification and rollback tracking
@@ -288,12 +301,35 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
             final documentPaths = savedProgress['documentPaths'] as Map<String, dynamic>? ?? {};
             // Note: We can't restore File objects directly, but we can show which documents were uploaded
             _documentPaths = Map<String, String>.from(documentPaths);
+            
+            // Show user which documents were previously uploaded
+            if (_documentPaths.isNotEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Found ${_documentPaths.length} previously uploaded documents. Please re-upload them.'),
+                  backgroundColor: Colors.blue,
+                  duration: const Duration(seconds: 3),
+                ),
+              );
+            }
           });
           
           print('✅ Driver signup progress restored');
           
           // Check if user has already paid
           await _checkPaymentStatus();
+          
+          // Check if user has a partial profile and show guidance
+          final hasPartial = await _hasPartialProfile();
+          if (hasPartial && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('We found some of your previous information. Please complete the remaining fields.'),
+                backgroundColor: Colors.blue,
+                duration: Duration(seconds: 4),
+              ),
+            );
+          }
         }
       }
     } catch (e) {
@@ -437,20 +473,34 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
     }
   }
 
-  // Rollback uploaded documents on failure
+  // Enhanced rollback method with better error handling
   Future<void> _rollbackUploadedDocuments() async {
+    if (_uploadedDocumentUrls.isEmpty) return;
+    
     try {
+      print('🔄 Rolling back ${_uploadedDocumentUrls.length} uploaded documents...');
+      
       for (final url in _uploadedDocumentUrls) {
-        final deleted = await cloudinaryService.deleteImage(url);
-        if (deleted) {
-          print('Successfully rolled back document: $url');
-        } else {
-          print('Failed to rollback document: $url');
+        try {
+          // Extract public ID from Cloudinary URL
+          final uri = Uri.parse(url);
+          final pathSegments = uri.pathSegments;
+          if (pathSegments.length >= 2) {
+            final publicId = pathSegments.sublist(1).join('/').replaceAll('.jpg', '').replaceAll('.png', '');
+            await cloudinaryService.deleteImage(publicId);
+            print('✅ Deleted document: $publicId');
+          }
+        } catch (e) {
+          print('⚠️ Failed to delete document $url: $e');
+          // Continue with other deletions even if one fails
         }
       }
+      
       _uploadedDocumentUrls.clear();
+      print('✅ Document rollback completed');
     } catch (e) {
-      print('Error rolling back documents: $e');
+      print('❌ Error during document rollback: $e');
+      // Don't throw here to avoid cascading errors
     }
   }
 
@@ -486,15 +536,10 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
 
   // Update _payR100 to navigate to PaymentScreen and only save after payment
   Future<void> _payR100() async {
-    if (!_formKey.currentState!.validate() || _selectedTowns.isEmpty) {
+    final validationError = _validateForm();
+    if (validationError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in all required fields and select at least one town.')),
-      );
-      return;
-    }
-    if (!_allDocsUploaded()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please upload all required documents.')),
+        SnackBar(content: Text(validationError)),
       );
       return;
     }
@@ -508,7 +553,7 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
       return;
     }
     final email = user.email!;
-    final amount = 150.0;
+    final amount = 100.0;
     
     Navigator.push(
       context,
@@ -521,14 +566,14 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
             
             // Show loading indicator
             if (mounted) {
-              setState(() => _isLoading = true);
+              _setLoading(true, message: 'Completing profile...');
             }
             
             try {
               // Step 1: Verify payment in database
               if (!await _verifyPaymentSuccess()) {
                 if (mounted) {
-                  setState(() => _isLoading = false);
+                  _setLoading(false);
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('Payment verification failed. Please try again.'),
@@ -548,7 +593,7 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
             } catch (e) {
               // Handle any errors during the process
               if (mounted) {
-                setState(() => _isLoading = false);
+                _setLoading(false);
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text('Error: ${e.toString()}'),
@@ -564,29 +609,126 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
     );
   }
 
-  // Complete profile for users who have already paid
-  Future<void> _completeProfileAfterPayment() async {
-    if (!_formKey.currentState!.validate() || _selectedTowns.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in all required fields and select at least one town.')),
-      );
-      return;
+  // Comprehensive form validation
+  String? _validateForm() {
+    // Basic form validation
+    if (!_formKey.currentState!.validate()) {
+      return 'Please fill in all required fields correctly.';
     }
+    
+    // Check name
+    if (_nameController.text.trim().isEmpty) {
+      return 'Please enter your full name.';
+    }
+    
+    // Check phone number
+    if (_phoneNumberController.text.trim().isEmpty) {
+      return 'Please enter your phone number.';
+    }
+    
+    // Check ID number
+    if (_idNumberController.text.trim().isEmpty) {
+      return 'Please enter your ID number.';
+    }
+    
+    // Check vehicle information
+    if (_selectedVehicleType == null || _selectedVehicleType!.isEmpty) {
+      return 'Please select a vehicle type.';
+    }
+    
+    if (_selectedBrand == null || _selectedBrand!.isEmpty) {
+      return 'Please select a vehicle brand.';
+    }
+    
+    if (_selectedModel == null || _selectedModel!.isEmpty) {
+      return 'Please select a vehicle model.';
+    }
+    
+    if (_selectedColor == null || _selectedColor!.isEmpty) {
+      return 'Please select a vehicle color.';
+    }
+    
+    if (_licensePlateController.text.trim().isEmpty) {
+      return 'Please enter your license plate number.';
+    }
+    
+    // Check location information
+    if (_selectedProvince == null || _selectedProvince!.isEmpty) {
+      return 'Please select your province.';
+    }
+    
+    if (_selectedTowns.isEmpty) {
+      return 'Please select at least one town for service areas.';
+    }
+    
+    // Check vehicle purposes
+    if (_selectedPurposes.isEmpty) {
+      return 'Please select at least one vehicle purpose.';
+    }
+    
+    // Check documents
     if (!_allDocsUploaded()) {
+      return 'Please upload all required documents.';
+    }
+    
+    return null; // No validation errors
+  }
+
+  // Pay Later option - skip payment and go to congratulations
+  Future<void> _payLater() async {
+    final validationError = _validateForm();
+    if (validationError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please upload all required documents.')),
+        SnackBar(content: Text(validationError)),
       );
       return;
     }
     
-    setState(() => _isLoading = true);
+    // Show loading indicator
+    if (mounted) {
+      _setLoading(true, message: 'Completing profile...');
+    }
+    
+    try {
+      // Upload documents to Cloudinary (skip payment check for pay-later users)
+      final uploadedDocUrls = await _uploadDocumentsAfterPayment(skipPaymentCheck: true);
+      
+      // Create driver profile with uploaded document URLs and payLater flag
+      await _submitDriverProfilePayLater(uploadedDocUrls);
+      
+    } catch (e) {
+      // Handle any errors during the process
+      if (mounted) {
+        _setLoading(false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
+  }
+
+  // Complete profile for users who have already paid
+  Future<void> _completeProfileAfterPayment() async {
+    final validationError = _validateForm();
+    if (validationError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(validationError)),
+      );
+      return;
+    }
+    
+    _setLoading(true);
     
     try {
       // Upload documents and create profile
       final uploadedDocUrls = await _uploadDocumentsAfterPayment();
       await _submitDriverProfile(uploadedDocUrls);
     } catch (e) {
-      setState(() => _isLoading = false);
+      _setLoading(false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error: ${e.toString()}'),
@@ -598,7 +740,7 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
   }
 
   Future<void> _submitDriverProfile([Map<String, String>? preUploadedDocUrls]) async {
-    setState(() => _isLoading = true);
+    _setLoading(true, message: 'Creating your driver profile...');
     final Map<String, String> docUrls = preUploadedDocUrls ?? {}; // Use pre-uploaded URLs if provided
     String? profileImageUrl;
     
@@ -616,7 +758,7 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Please upload a profile image.')),
         );
-        setState(() => _isLoading = false);
+        _setLoading(false);
         return;
       }
 
@@ -626,7 +768,7 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('You are not logged in. Please log in again.')),
         );
-        setState(() => _isLoading = false);
+        _setLoading(false);
         return;
       }
 
@@ -667,7 +809,7 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
         await _handleReferral(referralCode, user.uid);
       }
 
-      setState(() => _isLoading = false);
+      _setLoading(false);
 
       if (!mounted) return;
 
@@ -684,7 +826,7 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
         ),
       );
     } catch (e) {
-      setState(() => _isLoading = false);
+      _setLoading(false);
       
       // Rollback uploaded documents on any error
       await _rollbackUploadedDocuments();
@@ -754,22 +896,24 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
   }
 
   // Upload documents to Cloudinary after payment verification
-  Future<Map<String, String>> _uploadDocumentsAfterPayment() async {
+  Future<Map<String, String>> _uploadDocumentsAfterPayment({bool skipPaymentCheck = false}) async {
     final Map<String, String> docUrls = {};
     String? profileImageUrl;
     
     try {
-      // Verify payment again before uploading documents
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
         throw Exception('User session expired');
       }
       
-      final paymentVerified = await Provider.of<DatabaseService>(context, listen: false)
-          .verifyDriverPayment(user.uid);
-      
-      if (!paymentVerified) {
-        throw Exception('Payment verification failed. Please complete payment first.');
+      // Only verify payment if not skipping payment check (for pay-later users)
+      if (!skipPaymentCheck) {
+        final paymentVerified = await Provider.of<DatabaseService>(context, listen: false)
+            .verifyDriverPayment(user.uid);
+        
+        if (!paymentVerified) {
+          throw Exception('Payment verification failed. Please complete payment first.');
+        }
       }
       
       // Show upload progress
@@ -781,6 +925,7 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
             duration: Duration(seconds: 2),
           ),
         );
+        _setLoading(true, message: 'Uploading documents...');
       }
       
       // Iterate over the documents and upload to Cloudinary
@@ -788,6 +933,10 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
         final file = entry.value;
         if (file != null) {
           try {
+            if (mounted) {
+              _setLoading(true, message: 'Uploading ${entry.key}...');
+            }
+            
             final uploadedUrl = await cloudinaryService.uploadImage(file);
             if (uploadedUrl != null) {
               docUrls[entry.key] = uploadedUrl;
@@ -979,6 +1128,16 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
                     ),
                     const SizedBox(height: 16),
 
+                    // License Plate (Required)
+                    CustomTextField(
+                      controller: _licensePlateController,
+                      label: 'License Plate *',
+                      hintText: 'Enter your vehicle license plate',
+                      prefixIcon: Icons.confirmation_number,
+                      validator: (value) => Validators.validateLicensePlate(value),
+                    ),
+                    const SizedBox(height: 16),
+
                     // Vehicle Purpose Selection
                     const SizedBox(height: 24),
                     const Text('Choose what you would like to do', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppColors.primary)),
@@ -1155,13 +1314,56 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
                     ),
                     const SizedBox(height: 24),
 
-                    // Submit button
-                    CustomButton(
-                      text: 'Pay R150 & Submit Application',
-                      onPressed: _payR100,
-                      isFullWidth: true,
+                    // Submit buttons
+                    Row(
+                      children: [
+                        Expanded(
+                          child: CustomButton(
+                            text: 'Pay R100 & Submit',
+                            onPressed: _payR100,
+                            isFullWidth: true,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: CustomButton(
+                            text: 'Pay Later',
+                            onPressed: _payLater,
+                            isFullWidth: true,
+                            color: Colors.orange,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 30),
+                    const SizedBox(height: 16),
+
+                    // Pay Later Info
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.orange),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info, color: Colors.orange),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: const [
+                                Text('Pay Later Option', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange)),
+                                SizedBox(height: 4),
+                                Text('If you choose "Pay Later", your first week platform fee will be R600 instead of R450.', style: TextStyle(color: Colors.orange, fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
 
                     // Note about approval
                     Container(
@@ -1193,7 +1395,24 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
               ),
             ),
 
-          if (_isLoading) const LoadingIndicator(),
+          if (_isLoading) 
+            Container(
+              color: Colors.black54,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const CircularProgressIndicator(color: Colors.white),
+                    const SizedBox(height: 16),
+                    Text(
+                      _loadingMessage.isNotEmpty ? _loadingMessage : 'Processing...',
+                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     ));
@@ -1234,4 +1453,139 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
   }
 
   bool _allDocsUploaded() => _documents.values.every((file) => file != null);
+
+  Future<void> _submitDriverProfilePayLater([Map<String, String>? preUploadedDocUrls]) async {
+    _setLoading(true, message: 'Creating your driver profile...');
+    final Map<String, String> docUrls = preUploadedDocUrls ?? {}; // Use pre-uploaded URLs if provided
+    String? profileImageUrl;
+    
+    try {
+      // If no pre-uploaded URLs provided, upload documents (for backward compatibility)
+      if (preUploadedDocUrls == null) {
+        docUrls.addAll(await _uploadDocumentsAfterPayment(skipPaymentCheck: true));
+      }
+      
+      // Get profile image URL
+      profileImageUrl = docUrls['Driver Profile Image'];
+      
+      // Ensure profile image is present
+      if (profileImageUrl == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please upload a profile image.')),
+        );
+        _setLoading(false);
+        return;
+      }
+
+      // Use the current authenticated user
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You are not logged in. Please log in again.')),
+        );
+        _setLoading(false);
+        return;
+      }
+
+      // Determine driver preferences based on selected purposes
+      final isFemale = _selectedPurposes.contains('females');
+      final isForStudents = _selectedPurposes.contains('students');
+      final isLuxury = _selectedPurposes.contains('luxury');
+      final isMax2 = _selectedPurposes.contains('1-2 seater');
+
+      // Create driver model with payLater flag
+      final driverModel = DriverModel(
+        userId: user.uid,
+        idNumber: _idNumberController.text.trim(),
+        name: _nameController.text.trim(),
+        phoneNumber: _phoneNumberController.text.trim(),
+        email: _emailController.text.trim(),
+        province: _selectedProvince,
+        towns: _selectedTowns,
+        documents: docUrls,
+        vehicleType: _selectedVehicleType,
+        vehicleModel: _selectedModel,
+        vehicleColor: _selectedColor,
+        licensePlate: _licensePlateController.text.trim(),
+        isFemale: isFemale,
+        isForStudents: isForStudents,
+        isLuxury: isLuxury,
+        isMax2: isMax2,
+        vehiclePurposes: _selectedPurposes,
+        payLater: true, // Mark as pay later
+      );
+
+      // Save driver profile
+      final databaseService = Provider.of<DatabaseService>(context, listen: false);
+      await databaseService.createDriverProfile(driverModel);
+
+      // Handle referral if provided
+      final referralCode = _referralCodeController.text.trim();
+      if (referralCode != null && referralCode.isNotEmpty) {
+        await _handleReferral(referralCode, user.uid);
+      }
+
+      _setLoading(false);
+
+      if (!mounted) return;
+
+      // Clear saved progress after successful submission
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser != null) {
+        await databaseService.clearDriverSignupProgress(currentUser.uid);
+      }
+
+      // Navigate to congratulations screen
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => const CongratulationsScreen(),
+        ),
+      );
+    } catch (e) {
+      _setLoading(false);
+      
+      // Rollback uploaded documents on any error
+      await _rollbackUploadedDocuments();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }
+  }
+
+  // Check if user has a partially completed profile
+  Future<bool> _hasPartialProfile() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return false;
+      
+      final databaseService = Provider.of<DatabaseService>(context, listen: false);
+      final driver = await databaseService.getCurrentDriver();
+      
+      if (driver != null) {
+        // Check if they have some data but not complete
+        final hasBasicInfo = driver.name.isNotEmpty && 
+                            driver.phoneNumber.isNotEmpty && 
+                            driver.email.isNotEmpty;
+        
+        final hasVehicleInfo = driver.vehicleType != null && 
+                              driver.vehicleModel != null && 
+                              driver.licensePlate != null;
+        
+        final hasDocuments = driver.documents.isNotEmpty;
+        
+        // Return true if they have some data but not everything
+        return hasBasicInfo && (hasVehicleInfo || hasDocuments);
+      }
+      
+      return false;
+    } catch (e) {
+      print('Error checking partial profile: $e');
+      return false;
+    }
+  }
 }

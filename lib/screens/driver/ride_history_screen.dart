@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../constants/app_colors.dart';
+import '../../models/ride_model.dart';
 import '../../services/auth_service.dart';
 import '../../services/database_service.dart';
 
@@ -118,8 +119,8 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
     final pickup = ride['pickupAddress'] as String? ?? 'Unknown Pickup';
     final destination = ride['destinationAddress'] as String? ?? 'Unknown Destination';
 
-    final isCompleted = status == 2;
-    final isCancelled = status == 3;
+    final isCompleted = status == RideStatus.completed.index;
+    final isCancelled = status == RideStatus.cancelled.index;
 
     final color = isCompleted
                         ? Colors.green
