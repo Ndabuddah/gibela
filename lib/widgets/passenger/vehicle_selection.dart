@@ -109,16 +109,16 @@ class _VehicleTypeCard extends StatelessWidget {
             children: [
               // Vehicle image
               Container(
-                width: 60,
-                height: 60,
+                width: 50,
+                height: 50,
                 decoration: BoxDecoration(
                   color: AppColors.primary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Image.asset(
                   image,
-                  width: 40,
-                  height: 40,
+                  width: 32,
+                  height: 32,
                 ),
               ),
               const SizedBox(width: 16),

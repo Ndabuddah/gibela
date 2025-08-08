@@ -28,6 +28,11 @@ class ChatService {
       throw Exception('User is not a participant in this chat');
     }
 
+    // Validate participants
+    if (participants.isEmpty) {
+      throw Exception('Chat has no participants');
+    }
+
     // Add message to the chat
     await _firestore.collection('chats').doc(chatId).collection('messages').add({
       'senderId': userId,
@@ -40,8 +45,17 @@ class ChatService {
 
     // Update chat metadata and unread counts
     final unreadMap = Map<String, dynamic>.from(chatDoc.data()?['unread'] ?? {});
+    
+    // Ensure all participants have unread counts initialized
     for (final participantId in participants) {
-      if (participantId != userId) {
+      if (participantId.isNotEmpty && !unreadMap.containsKey(participantId)) {
+        unreadMap[participantId] = 0;
+      }
+    }
+    
+    // Update unread counts for non-sender participants
+    for (final participantId in participants) {
+      if (participantId.isNotEmpty && participantId != userId) {
         unreadMap[participantId] = (unreadMap[participantId] ?? 0) + 1;
       }
     }
@@ -132,6 +146,11 @@ class ChatService {
 
   // Get or create a chat between two users
   Future<String> _getOrCreateChat(String user1Id, String user2Id) async {
+    // Validate input parameters
+    if (user1Id.isEmpty || user2Id.isEmpty) {
+      throw Exception('User IDs cannot be empty');
+    }
+    
     // Sort IDs to ensure consistency
     final participants = [user1Id, user2Id]..sort();
     final chatId = participants.join('_');

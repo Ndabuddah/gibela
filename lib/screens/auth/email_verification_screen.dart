@@ -11,6 +11,8 @@ import '../../constants/app_colors.dart';
 import '../../widgets/common/modern_alert_dialog.dart';
 import 'driver_signup_screen.dart';
 import 'passenger_registration_screen.dart';
+import 'no_car_application_screen.dart';
+import 'owner_application_screen.dart';
 
 class EmailVerificationScreen extends StatefulWidget {
   final User user;
@@ -88,23 +90,64 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
       if (!mounted) return;
 
       try {
-        // Check if they're a driver from the widget parameter
-        if (_isDriver) {
-          print('📱 Navigating to driver registration...');
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (_) => const DriverSignupScreen(),
-              settings: const RouteSettings(name: '/driver_signup'),
-            ),
-          );
+        // Get user model to determine specific role
+        final databaseService = Provider.of<DatabaseService>(context, listen: false);
+        final userModel = await databaseService.getUserById(widget.user.uid);
+        
+        if (userModel != null) {
+          // Navigate based on specific user role
+          if (userModel.userRole == 'driver_no_car') {
+            print('📱 Navigating to driver no car application...');
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => NoCarApplicationScreen(user: widget.user, userModel: userModel),
+                settings: const RouteSettings(name: '/no_car_application'),
+              ),
+            );
+          } else if (userModel.userRole == 'car_owner') {
+            print('📱 Navigating to car owner application...');
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => OwnerApplicationScreen(user: widget.user, userModel: userModel),
+                settings: const RouteSettings(name: '/owner_application'),
+              ),
+            );
+          } else if (userModel.isDriver) {
+            print('📱 Navigating to driver registration...');
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => const DriverSignupScreen(),
+                settings: const RouteSettings(name: '/driver_signup'),
+              ),
+            );
+          } else {
+            print('📱 Navigating to passenger registration...');
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => const PassengerRegistrationScreen(),
+                settings: const RouteSettings(name: '/passenger_registration'),
+              ),
+            );
+          }
         } else {
-          print('📱 Navigating to passenger registration...');
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (_) => const PassengerRegistrationScreen(),
-              settings: const RouteSettings(name: '/passenger_registration'),
-            ),
-          );
+          // Fallback to original logic if user model not found
+          if (_isDriver) {
+            print('📱 Navigating to driver registration...');
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => const DriverSignupScreen(),
+                settings: const RouteSettings(name: '/driver_signup'),
+              ),
+            );
+          } else {
+            print('📱 Navigating to passenger registration...');
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => const PassengerRegistrationScreen(),
+                settings: const RouteSettings(name: '/passenger_registration'),
+              ),
+            );
+          }
         }
       } catch (e) {
         print('Navigation error: $e');

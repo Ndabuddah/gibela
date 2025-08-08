@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'dart:ui';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:intl/intl.dart';
+
 import 'package:gibelbibela/models/driver_model.dart';
 import 'package:gibelbibela/models/notification_model.dart';
 import 'package:gibelbibela/models/ride_model.dart';
@@ -8,12 +12,18 @@ import 'package:gibelbibela/models/user_model.dart';
 import 'package:gibelbibela/screens/auth/login_screen.dart';
 import 'package:gibelbibela/screens/driver/ride_history_screen.dart' as driver_history;
 import 'package:gibelbibela/screens/home/driver/earnings_screen.dart';
+import 'package:gibelbibela/screens/home/driver/missing_fields_screen.dart';
 import 'package:gibelbibela/screens/permissions/location_permission_screen.dart';
 import 'package:gibelbibela/services/database_service.dart';
 import 'package:gibelbibela/services/driver_access_service.dart';
 import 'package:gibelbibela/services/permission_service.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../../services/scheduled_reminder_service.dart';
+import '../../../widgets/scheduled_reminder_dialog.dart';
+import '../../../widgets/floating_countdown_widget.dart';
+import '../../scheduled_booking_details_screen.dart';
 
 import '../../../constants/app_colors.dart';
 import '../../../providers/theme_provider.dart';
@@ -27,6 +37,8 @@ import '../../auth/email_verification_screen.dart';
 import '../../notifications/notification_screen.dart';
 import '../../payments/payment_screen.dart';
 import 'ride_request_list_screen.dart';
+import 'scheduled_requests_section.dart';
+import 'driver_settings_screen.dart';
 
 class DriverHomeScreen extends StatefulWidget {
   const DriverHomeScreen({
@@ -61,6 +73,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
   int ridesCompleted = 0;
   bool isEarningsLoading = true;
   List<Map<String, dynamic>> _recentRides = [];
+  String? _cachedProfileImageUrl;
 
   @override
   void initState() {
@@ -74,11 +87,21 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
       _loadUserData(); // Add this to load initial online status
       // Removed _checkLocationPermissions() - no need to check permissions on every startup
       // Removed _checkApprovalStatus() - let validation banner handle it
+      
+      // Initialize scheduled reminders
+      final reminderService = Provider.of<ScheduledReminderService>(context, listen: false);
+      reminderService.loadScheduledBookings();
     });
     _getCurrentLocation();
     fetchEarnings();
     _fetchDriver();
     _checkWelcomeAlert();
+    
+    // Load profile image for driver
+    final user = Provider.of<AuthService>(context, listen: false).userModel;
+    if (user?.isDriver == true) {
+      _loadProfileImage(user!.uid);
+    }
   }
 
   Future<void> _fetchAndSetUser() async {
@@ -124,6 +147,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
   bool get _needsProfileCompletion {
     // If still loading, don't show profile completion requirement yet
     if (_loading) {
+      return false;
+    }
+    
+    // Hide profile completion requirement for approved drivers
+    if (_currentUser?.isApproved == true) {
       return false;
     }
     
@@ -228,8 +256,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
 
     _statusAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _statusController, curve: Curves.easeInOut));
 
-    _fadeController.forward();
-    _slideController.forward();
+    if (mounted) {
+      _fadeController.forward();
+      _slideController.forward();
+    }
   }
 
   Future<void> _loadUserData() async {
@@ -582,6 +612,19 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
     }
   }
 
+  Future<void> _loadProfileImage(String userId) async {
+    try {
+      final profileImageUrl = await DatabaseService().getDriverProfileImage(userId);
+      if (mounted) {
+        setState(() {
+          _cachedProfileImageUrl = profileImageUrl;
+        });
+      }
+    } catch (e) {
+      print('Error loading profile image: $e');
+    }
+  }
+
   // Driver validation state
   String? _validationStatus;
   String? _validationMessage;
@@ -755,6 +798,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this); // Remove lifecycle observer
+    _fadeController.stop();
+    _slideController.stop();
+    _statusController.stop();
     _fadeController.dispose();
     _slideController.dispose();
     _statusController.dispose();
@@ -774,6 +820,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
+    final reminderService = Provider.of<ScheduledReminderService>(context);
     final isDark = themeProvider.isDarkMode;
 
     if (_loading) {
@@ -786,377 +833,206 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: AppColors.getBackgroundColor(isDark),
-      drawer: ModernDrawer(user: Provider.of<AuthService>(context).userModel, onLogout: () => handleDrawerLogout(context)),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Header
-            FadeTransition(
-              opacity: _fadeAnimation,
-              child: SlideTransition(
-                position: _slideAnimation,
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  child: Row(
-                    children: [
-                      // Menu Button
-                      _ModernIconButton(icon: Icons.menu, onPressed: _openDrawer, isDark: isDark),
-                      const SizedBox(width: 16),
-                      // Header Column for status and toggle
-                      Expanded(
-                        child: Builder(
+      drawer: ModernDrawer(
+        user: Provider.of<AuthService>(context).userModel,
+        onLogout: () => handleDrawerLogout(context),
+      ),
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Column(
+              children: [
+                // Header
+                FadeTransition(
+                  opacity: _fadeAnimation,
+                  child: SlideTransition(
+                    position: _slideAnimation,
+                    child: Container(
+                      padding: const EdgeInsets.all(20),
+                      child: Row(
+                        children: [
+                          // Menu Button
+                          _ModernIconButton(icon: Icons.menu, onPressed: _openDrawer, isDark: isDark),
+                          const SizedBox(width: 16),
+                          // Empty space
+                          const Expanded(child: SizedBox()),
+                          // Profile Image and Notification Icon
+                          Row(children: [
+                            _buildNotificationIcon(context), 
+                            const SizedBox(width: 12), 
+                            _buildProfileAvatar(),
+                            const SizedBox(width: 12),
+                            _buildSettingsButton(),
+                          ]),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+                // Main Content
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(
+                      children: [
+                        // Approval Status Banner - Right under the header
+                        Builder(
                           builder: (context) {
                             final user = Provider.of<AuthService>(context).userModel;
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // Approval badge and refresh in a row
-                                Row(
+                            return FadeTransition(
+                              opacity: _fadeAnimation,
+                              child: Container(
+                                width: double.infinity,
+                                margin: const EdgeInsets.only(bottom: 32),
+                                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                                decoration: BoxDecoration(
+                                  color: user?.isApproved == true 
+                                    ? Colors.green.withOpacity(0.1)
+                                    : Colors.orange.withOpacity(0.1),
+                                  border: Border.all(
+                                    color: user?.isApproved == true ? Colors.green : Colors.orange
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
                                   children: [
-                                    if (user?.isApproved == true)
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                        decoration: BoxDecoration(color: Colors.green[600], borderRadius: BorderRadius.circular(12)),
-                                        child: Row(
-                                          children: const [
-                                            Icon(Icons.verified, color: Colors.white, size: 16),
-                                            SizedBox(width: 4),
-                                            Text(
-                                              'Approved',
-                                              style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                    Icon(
+                                      user?.isApproved == true ? Icons.verified : Icons.pending,
+                                      color: user?.isApproved == true ? Colors.green : Colors.orange,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            user?.isApproved == true ? 'Account Approved' : 'Account Under Review',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: user?.isApproved == true ? Colors.green : Colors.orange,
+                                              fontSize: 14,
                                             ),
-                                          ],
-                                        ),
-                                      )
-                                    else
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                        decoration: BoxDecoration(color: Colors.amber[700], borderRadius: BorderRadius.circular(12)),
-                                        child: Row(
-                                          children: const [
-                                            SizedBox(width: 4),
-                                            Text(
-                                              'Awaiting approval',
-                                              style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            user?.isApproved == true 
+                                              ? 'You can now go online and accept ride requests.'
+                                              : 'Your account is awaiting approval. You\'ll be notified once approved.',
+                                            style: TextStyle(
+                                              color: user?.isApproved == true 
+                                                ? Colors.green.shade800 
+                                                : Colors.orange.shade800,
+                                              fontSize: 12,
                                             ),
-                                          ],
-                                        ),
+                                          ),
+                                        ],
                                       ),
-                                    // Refresh Button
+                                    ),
                                   ],
                                 ),
-                                const SizedBox(height: 12),
-                              ],
+                              ),
                             );
                           },
                         ),
-                      ),
-                      // Profile Image and Notification Icon
-                      Row(children: [_buildNotificationIcon(context), const SizedBox(width: 12), _buildProfileAvatar()]),
-                    ],
-                  ),
-                ),
-              ),
-            ),
 
-            // Main Content
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Column(
-                  children: [
-                    // Approval Status Banner - Right under the header
-                    Builder(
-                      builder: (context) {
-                        final user = Provider.of<AuthService>(context).userModel;
-                        if (user?.isApproved != true)
-                          return FadeTransition(
-                            opacity: _fadeAnimation,
-                            child: Container(
-                              width: double.infinity,
-                              margin: const EdgeInsets.only(bottom: 16),
-                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                              decoration: BoxDecoration(
-                                color: Colors.orange.withOpacity(0.1),
-                                border: Border.all(color: Colors.orange),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.pending, color: Colors.orange),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        const Text(
-                                          'Account Under Review',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.orange,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          'Your account is awaiting approval. You\'ll be notified once approved.',
-                                          style: TextStyle(
-                                            color: Colors.orange.shade800,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        return const SizedBox.shrink();
-                      },
-                    ),
-
-                    // Validation Banner - for incomplete drivers
-                    if (_showValidationBanner || _needsProfileCompletion)
-                      FadeTransition(
-                        opacity: _fadeAnimation,
-                        child: Container(
-                          width: double.infinity,
-                          margin: const EdgeInsets.only(bottom: 16),
-                          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                AppColors.primary.withOpacity(0.1),
-                                AppColors.primary.withOpacity(0.05),
-                              ],
-                            ),
-                            border: Border.all(color: AppColors.primary.withOpacity(0.3)),
-                            borderRadius: BorderRadius.circular(12),
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppColors.primary.withOpacity(0.1),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.primary,
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Icon(
-                                      (_validationStatus == 'signup_required' || _needsProfileCompletion)
-                                        ? Icons.person_add 
-                                        : Icons.payment,
-                                      color: Colors.white,
-                                      size: 20,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          (_validationStatus == 'signup_required' || _needsProfileCompletion)
-                                            ? 'Complete Your Profile' 
-                                            : 'Payment Required',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 16,
-                                            color: AppColors.primary,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          _validationMessage ?? (_needsProfileCompletion 
-                                            ? 'Complete your driver profile to start earning' 
-                                            : ''),
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            color: isDark ? Colors.white70 : Colors.black87,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 16),
-                              SizedBox(
+                        // Driver Name
+                        Builder(
+                          builder: (context) {
+                            final user = Provider.of<AuthService>(context).userModel;
+                            return FadeTransition(
+                              opacity: _fadeAnimation,
+                              child: Container(
                                 width: double.infinity,
-                                child: ElevatedButton(
-                                  onPressed: _handleValidationAction,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppColors.primary,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
+                                margin: const EdgeInsets.only(bottom: 20),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Welcome back,',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        color: AppColors.getTextSecondaryColor(isDark),
+                                        fontWeight: FontWeight.w500,
+                                      ),
                                     ),
-                                  ),
-                                  child: Text(
-                                    (_validationStatus == 'signup_required' || _needsProfileCompletion)
-                                      ? 'Complete Profile' 
-                                      : 'Make Payment',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14,
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      user?.name ?? 'Driver',
+                                      style: TextStyle(
+                                        fontSize: 24,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppColors.getTextPrimaryColor(isDark),
+                                      ),
                                     ),
-                                  ),
+                                  ],
                                 ),
                               ),
-                            ],
-                          ),
-                        ),
-                      ),
-
-                    // Incomplete Profile Card
-                    FutureBuilder<Map<String, bool>>(
-                      future: Future.wait([
-                        _isPaymentRequired(),
-                        _isPayLater(),
-                      ]).then((results) => {
-                        'isPaymentRequired': results[0],
-                        'isPayLater': results[1],
-                      }),
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState == ConnectionState.waiting) {
-                          return const SizedBox.shrink();
-                        }
-                        
-                        final isPaymentRequired = snapshot.data?['isPaymentRequired'] ?? false;
-                        final isPayLater = snapshot.data?['isPayLater'] ?? false;
-                        final hasMissingFields = (_currentUser?.missingProfileFields.isNotEmpty ?? false);
-                        
-                        // Show card only if:
-                        // 1. There are missing fields (regardless of payment model), OR
-                        // 2. Payment is required AND user is not using pay-later
-                        if (hasMissingFields || (isPaymentRequired && !isPayLater)) {
-                          return _buildIncompleteProfileCard(isDark);
-                        }
-                        return const SizedBox.shrink();
-                      },
-                    ),
-
-                    // Welcome Alert Card
-                    if (_showWelcomeAlert)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        child: Card(
-                          elevation: 8,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(20),
-                              gradient: LinearGradient(colors: [AppColors.primary, AppColors.primaryLight], begin: Alignment.topLeft, end: Alignment.bottomRight),
-                              boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.15), blurRadius: 24, offset: Offset(0, 8))],
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(24),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      // You can use a Lottie animation here if you want!
-                                      Icon(Icons.celebration, color: AppColors.black, size: 32),
-                                      const SizedBox(width: 12),
-                                      Text(
-                                        'Welcome!',
-                                        style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.primaryDark),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 14),
-                                  Text(
-                                    'Your first week is free. After that, you\'ll pay R450 per week. You\'ll receive a reminder to pay.',
-                                    style: TextStyle(fontSize: 16, color: AppColors.textDark.withOpacity(0.85), fontWeight: FontWeight.w500),
-                                  ),
-                                  const SizedBox(height: 24),
-                                  Align(
-                                    alignment: Alignment.centerRight,
-                                    child: ElevatedButton(
-                                      onPressed: _dismissWelcomeAlert,
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: AppColors.black,
-                                        foregroundColor: Colors.white,
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-                                        elevation: 0,
-                                      ),
-                                      child: const Text('OK, got it', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-
-                    // Status Card
-                    FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: SlideTransition(
-                        position: _slideAnimation,
-                        child: _StatusCard(isOnline: _isOnline, address: _currentAddress, isLoading: _isLoading, onRefresh: _getCurrentLocation, onToggle: _toggleOnlineStatus, isDark: isDark),
-                      ),
-                    ),
-
-                    const SizedBox(height: 30),
-
-                    // Quick Actions
-                    FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: SlideTransition(
-                        position: _slideAnimation,
-                        child: _QuickActionsSection(
-                          onViewRequests: _viewRideRequests,
-                          onViewEarnings: () {
-                            Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EarningsScreen()));
+                            );
                           },
-                          isDark: isDark,
                         ),
-                      ),
+
+                        // Online/Offline Status Card
+                        FadeTransition(
+                          opacity: _fadeAnimation,
+                          child: SlideTransition(
+                            position: _slideAnimation,
+                            child: _StatusCard(
+                              isOnline: _isOnline,
+                              address: _currentAddress,
+                              isLoading: _isLoading,
+                              onRefresh: _getCurrentLocation,
+                              onToggle: _toggleOnlineStatus,
+                              isDark: isDark,
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 20),
+
+                        // Quick Actions
+                        FadeTransition(
+                          opacity: _fadeAnimation,
+                          child: SlideTransition(
+                            position: _slideAnimation,
+                            child: _QuickActionsSection(isDark: isDark, onViewRideRequests: _viewRideRequests),
+                          ),
+                        ),
+
+                        const SizedBox(height: 30),
+
+                        // Recent Rides
+                        FadeTransition(
+                          opacity: _fadeAnimation,
+                          child: SlideTransition(
+                            position: _slideAnimation,
+                            child: _RecentRidesSection(isDark: isDark),
+                          ),
+                        ),
+
+                        const SizedBox(height: 30),
+                      ],
                     ),
-
-                    const SizedBox(height: 30),
-
-                    // Earnings Section
-                    FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: SlideTransition(
-                        position: _slideAnimation,
-                        child: _EarningsSection(isDark: isDark, todayEarnings: todayEarnings, ridesCompleted: ridesCompleted),
-                      ),
-                    ),
-
-                    const SizedBox(height: 30),
-
-                    // Recent Rides
-                    FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: SlideTransition(
-                        position: _slideAnimation,
-                        child: _RecentRidesSection(isDark: isDark),
-                      ),
-                    ),
-
-                    const SizedBox(height: 30),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
-          ],
-        ),
+          ),
+          
+          // Floating countdown widgets
+          ...reminderService.countdowns.entries.map((entry) {
+            return FloatingCountdownWidget(
+              scheduledBooking: {"id": entry.key, "scheduledDateTime": Timestamp.fromDate(DateTime.now().add(entry.value))},
+              onTap: () => _openBookingDetails(entry.key),
+            );
+          }).toList(),
+          
+          // Reminder dialog
+          ...(reminderService.showReminderDialog && reminderService.currentReminder != null
+              ? [_buildReminderDialog(reminderService)]
+              : []),
+        ],
       ),
     );
   }
@@ -1171,15 +1047,39 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
         final notifications = snapshot.data ?? [];
         final unreadCount = notifications.where((n) => !n.isRead).length;
 
-        return Badge(
-          isLabelVisible: unreadCount > 0,
-          label: Text(unreadCount.toString()),
-          child: IconButton(
-            icon: const Icon(Icons.notifications_outlined),
-            onPressed: () {
-              Navigator.of(context).push(MaterialPageRoute(builder: (context) => const NotificationScreen()));
-            },
-          ),
+        return Stack(
+          children: [
+            IconButton(
+              icon: const Icon(Icons.notifications_outlined),
+              onPressed: () {
+                Navigator.of(context).push(MaterialPageRoute(builder: (context) => const NotificationScreen()));
+              },
+            ),
+            if (unreadCount > 0)
+              Positioned(
+                right: 8,
+                top: 8,
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  constraints: const BoxConstraints(
+                    minWidth: 16,
+                    minHeight: 16,
+                  ),
+                  child: Text(
+                    unreadCount.toString(),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+          ],
         );
       },
     );
@@ -1187,141 +1087,215 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
 
   Widget _buildProfileAvatar() {
     final user = Provider.of<AuthService>(context).userModel;
-    final profileImageUrl = user?.profileImageUrl;
-
-    if (profileImageUrl != null && profileImageUrl.isNotEmpty) {
-      return CircleAvatar(radius: 24, backgroundColor: Colors.grey[300], backgroundImage: NetworkImage(profileImageUrl));
-    } else if (user != null && user.isDriver) {
-      // Try to fetch from drivers collection if not present in users
-      return FutureBuilder<String?>(
-        future: DatabaseService().getDriverProfileImage(user.uid),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const CircleAvatar(
-              radius: 24,
-              backgroundColor: Colors.grey,
-              child: Icon(Icons.person, size: 28, color: Colors.white),
-            );
-          }
-          final driverImage = snapshot.data;
-          if (driverImage != null && driverImage.isNotEmpty) {
-            return CircleAvatar(radius: 24, backgroundColor: Colors.grey[300], backgroundImage: NetworkImage(driverImage));
-          }
-          return const CircleAvatar(
-            radius: 24,
-            backgroundColor: Colors.grey,
-            child: Icon(Icons.person, size: 28, color: Colors.white),
-          );
-        },
-      );
-    } else {
-      return const CircleAvatar(
+    
+    // For drivers, use cached profile image or load it once
+    if (user?.isDriver == true) {
+      // If we have a cached image, use it
+      if (_cachedProfileImageUrl != null && _cachedProfileImageUrl!.isNotEmpty) {
+        return CircleAvatar(
+          radius: 24,
+          backgroundColor: Colors.grey[300],
+          backgroundImage: NetworkImage(_cachedProfileImageUrl!),
+          child: null,
+        );
+      }
+      
+      // If no cached image, load it once and cache it
+      if (_cachedProfileImageUrl == null) {
+        _loadProfileImage(user!.uid);
+      }
+      
+      return CircleAvatar(
         radius: 24,
-        backgroundColor: Colors.grey,
-        child: Icon(Icons.person, size: 28, color: Colors.white),
+        backgroundColor: Colors.grey[300],
+        child: const Icon(Icons.person, size: 28, color: Colors.white),
       );
     }
+    
+    // For non-drivers, use the existing logic
+    return CircleAvatar(
+      radius: 24,
+      backgroundColor: Colors.grey[300],
+      backgroundImage: user?.profileImage != null && user!.profileImage!.isNotEmpty
+          ? NetworkImage(user.profileImage!)
+          : null,
+      child: user?.profileImage == null || user!.profileImage!.isEmpty
+          ? const Icon(Icons.person, size: 28, color: Colors.white)
+          : null,
+    );
   }
 
-  Widget _buildIncompleteProfileCard(bool isDark) {
-    return FutureBuilder<bool>(
-      future: _isPaymentRequired(),
-      builder: (context, paymentSnapshot) {
-        final isPaymentRequired = paymentSnapshot.data ?? false;
-        final missingFields = _currentUser?.missingProfileFields ?? [];
-        final hasOtherMissingFields = missingFields.isNotEmpty;
-        
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          child: Card(
-            color: AppColors.warning.withOpacity(0.15),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: AppColors.warning, width: 1.5),
-            ),
-            elevation: 0,
-            child: Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 28),
-                      const SizedBox(width: 12),
-                      const Text('Profile Incomplete', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Text('Please complete your profile to get approved. You are missing the following:', style: TextStyle(fontSize: 14, color: AppColors.getTextSecondaryColor(isDark))),
-                  const SizedBox(height: 12),
-                  // Show other missing fields
-                  ...missingFields.map(
-                    (field) => Padding(
-                      padding: const EdgeInsets.only(left: 8.0, bottom: 4.0),
-                      child: Row(
-                        children: [
-                          Icon(Icons.close, color: AppColors.error, size: 16),
-                          const SizedBox(width: 8),
-                          Text(field, style: const TextStyle(fontWeight: FontWeight.w500)),
-                        ],
-                      ),
-                    ),
-                  ),
-                  // Show payment requirement in red if only payment is missing
-                  if (isPaymentRequired && !hasOtherMissingFields)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 8.0, bottom: 4.0),
-                      child: Row(
-                        children: [
-                          Icon(Icons.close, color: AppColors.error, size: 16),
-                          const SizedBox(width: 8),
-                          Text('Payment Required', style: const TextStyle(fontWeight: FontWeight.w500, color: AppColors.error)),
-                        ],
-                      ),
-                    ),
-                  // Show payment requirement in red if other fields are also missing
-                  if (isPaymentRequired && hasOtherMissingFields)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 8.0, bottom: 4.0),
-                      child: Row(
-                        children: [
-                          Icon(Icons.close, color: AppColors.error, size: 16),
-                          const SizedBox(width: 8),
-                          Text('Payment Required', style: const TextStyle(fontWeight: FontWeight.w500, color: AppColors.error)),
-                        ],
-                      ),
-                    ),
-                  const SizedBox(height: 20),
-                  CustomButton(
-                    text: isPaymentRequired && !hasOtherMissingFields ? 'Complete Payment' : 'Complete Your Profile',
-                    onPressed: () {
-                      if (isPaymentRequired && !hasOtherMissingFields) {
-                        Navigator.of(context).push(MaterialPageRoute(
-                          builder: (context) => PaymentScreen(
-                            amount: 150.0,
-                            email: _currentUser?.email ?? '',
-                            onPaymentSuccess: () {
-                              Navigator.of(context).pop();
-                              setState(() {
-                                // Refresh the UI after successful payment
-                              });
-                            },
-                          ),
-                        ));
-                      } else {
-                        Navigator.of(context).push(MaterialPageRoute(builder: (context) => const DriverSignupScreen()));
-                      }
-                    },
-                    icon: Icons.arrow_forward,
-                    color: AppColors.warning,
-                  ),
-                ],
-              ),
-            ),
+  Widget _buildSettingsButton() {
+    return GestureDetector(
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => const DriverSettingsScreen(),
           ),
         );
       },
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: AppColors.primary.withOpacity(0.1),
+          shape: BoxShape.circle,
+          border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+        ),
+        child: Icon(
+          Icons.settings,
+          color: AppColors.primary,
+          size: 20,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIncompleteProfileCard(bool isDark) {
+    return FutureBuilder<Map<String, bool>>(
+      future: Future.wait([
+        _isPaymentRequired(),
+        _isPayLater(),
+      ]).then((results) => {
+        'isPaymentRequired': results[0],
+        'isPayLater': results[1],
+      }),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SizedBox.shrink();
+        }
+        
+        final isPaymentRequired = snapshot.data?['isPaymentRequired'] ?? false;
+        final isPayLater = snapshot.data?['isPayLater'] ?? false;
+        final hasMissingFields = (_currentUser?.missingProfileFields.isNotEmpty ?? false);
+        final isApproved = _currentUser?.isApproved ?? false;
+        final isProfileComplete = !(_currentUser?.requiresDriverSignup ?? false) && !hasMissingFields;
+        
+        // Hide card for approved drivers and drivers with complete profiles
+        if (isApproved || isProfileComplete) {
+          return const SizedBox.shrink();
+        }
+        
+        // Show card only if:
+        // 1. There are missing fields (regardless of payment model), OR
+        // 2. Payment is required AND user is not using pay-later
+        if (hasMissingFields || (isPaymentRequired && !isPayLater)) {
+          return _buildMissingFieldsCard(isDark, hasMissingFields, isPaymentRequired, isPayLater);
+        }
+        return const SizedBox.shrink();
+      },
+    );
+  }
+
+  Widget _buildMissingFieldsCard(bool isDark, bool hasMissingFields, bool isPaymentRequired, bool isPayLater) {
+    final missingFields = _currentUser?.missingProfileFields ?? [];
+    
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      child: Card(
+        color: AppColors.warning.withOpacity(0.15),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: AppColors.warning, width: 1.5),
+        ),
+        elevation: 0,
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 28),
+                  const SizedBox(width: 12),
+                  const Text('Profile Incomplete', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Please complete your profile to get approved. You are missing the following:',
+                style: TextStyle(fontSize: 14, color: AppColors.getTextSecondaryColor(isDark))
+              ),
+              const SizedBox(height: 12),
+              // Show missing fields
+              ...missingFields.map(
+                (field) => Padding(
+                  padding: const EdgeInsets.only(left: 8.0, bottom: 4.0),
+                  child: Row(
+                    children: [
+                      Icon(Icons.close, color: AppColors.error, size: 16),
+                      const SizedBox(width: 8),
+                      Text(field, style: const TextStyle(fontWeight: FontWeight.w500)),
+                    ],
+                  ),
+                ),
+              ),
+              // Show payment requirement if needed
+              if (isPaymentRequired && !isPayLater)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8.0, bottom: 4.0),
+                  child: Row(
+                    children: [
+                      Icon(Icons.close, color: AppColors.error, size: 16),
+                      const SizedBox(width: 8),
+                      Text('Payment Required', style: const TextStyle(fontWeight: FontWeight.w500, color: AppColors.error)),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 20),
+              CustomButton(
+                text: hasMissingFields ? 'Complete Profile' : 'Make Payment',
+                onPressed: () {
+                  if (hasMissingFields) {
+                    _navigateToMissingFieldsScreen();
+                  } else {
+                    _navigateToPaymentScreen();
+                  }
+                },
+                icon: Icons.arrow_forward,
+                color: AppColors.warning,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _navigateToMissingFieldsScreen() {
+    if (_currentUser != null) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => MissingFieldsScreen(
+            missingFields: _currentUser!.missingProfileFields,
+            user: _currentUser!,
+          ),
+        ),
+      ).then((result) {
+        // Refresh the screen if profile was updated
+        if (result == true) {
+          setState(() {
+            // Refresh user data
+            _fetchAndSetUser();
+          });
+        }
+      });
+    }
+  }
+
+  void _navigateToPaymentScreen() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => PaymentScreen(
+          amount: 100.00,
+          email: _currentUser?.email ?? '',
+          onPaymentSuccess: () {
+            Navigator.of(context).pop();
+            setState(() {
+              // Refresh the page to hide the payment card
+            });
+          },
+        ),
+      ),
     );
   }
 
@@ -1375,52 +1349,47 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
     );
   }
 
-  Widget _buildQuickActionsSection(bool isDark) {
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      childAspectRatio: 1.1,
-      crossAxisSpacing: 16,
-      mainAxisSpacing: 16,
-      children: [
-        Builder(
-          builder: (context) {
-            final user = Provider.of<AuthService>(context).userModel;
-            final isApproved = user?.isApproved == true;
-            return _ActionCard(
-              title: 'Ride Requests', 
-              subtitle: isApproved ? 'View available rides' : 'Awaiting approval', 
-              icon: Icons.list_alt, 
-              color: isApproved ? AppColors.primary : Colors.grey, 
-              onTap: _viewRideRequests, 
-              isDark: isDark,
-              isEnabled: isApproved,
-              gradient: isApproved 
-                ? LinearGradient(
-                    colors: [AppColors.primary.withOpacity(0.1), AppColors.primary.withOpacity(0.05)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  )
-                : null,
-            );
-          },
+  Widget _buildReminderDialog(ScheduledReminderService reminderService) {
+    return ScheduledReminderDialog(
+      reminder: reminderService.currentReminder!,
+      onDismiss: () => reminderService.dismissReminder(),
+      onViewDetails: () => _openBookingDetails(reminderService.currentReminder!['id']),
+    );
+  }
+
+  void _openBookingDetails(String bookingId) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ScheduledBookingDetailsScreen(
+          bookingId: bookingId,
+          isDriver: true,
         ),
-        _ActionCard(
-          title: 'Earnings',
-          subtitle: 'View your earnings',
-          icon: Icons.attach_money,
-          color: AppColors.success,
-          onTap: () {
-            Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EarningsScreen()));
-          },
-          isDark: isDark,
-          isEnabled: true,
-          gradient: LinearGradient(
-            colors: [AppColors.success.withOpacity(0.1), AppColors.success.withOpacity(0.05)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+      ),
+    );
+  }
+
+  Widget _buildQuickActionsSection(bool isDark) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Quick Actions',
+          style: TextStyle(color: AppColors.getTextPrimaryColor(isDark), fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: _ActionCard(title: 'Ride Requests', subtitle: 'View available rides', icon: Icons.list_alt, color: AppColors.primary, onTap: _viewRideRequests, isDark: isDark),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: _ActionCard(title: 'Earnings', subtitle: 'View your earnings', icon: Icons.attach_money, color: AppColors.success, onTap: () {
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EarningsScreen()));
+              }, isDark: isDark),
+            ),
+          ],
         ),
       ],
     );
@@ -1433,71 +1402,43 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Recent Rides', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            Text(
+              'Recent Rides',
+              style: TextStyle(color: AppColors.getTextPrimaryColor(isDark), fontSize: 20, fontWeight: FontWeight.bold),
+            ),
             TextButton(
               onPressed: () {
-                Navigator.of(context).push(MaterialPageRoute(builder: (_) => driver_history.RideHistoryScreen()));
+                // TODO: Implement view all rides
+                ModernSnackBar.show(context, message: 'View all rides coming soon!');
               },
-              child: const Text('View All'),
+              child: Text(
+                'View All',
+                style: TextStyle(color: AppColors.primary, fontSize: 14, fontWeight: FontWeight.w600),
+              ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
-        _recentRides.isEmpty
-            ? Center(
-                child: Column(
-                  children: [
-                    Icon(Icons.history, size: 60, color: AppColors.primary.withOpacity(0.18)),
-                    const SizedBox(height: 12),
-                    Text('No recent rides', style: TextStyle(fontSize: 16, color: AppColors.getTextSecondaryColor(isDark))),
-                  ],
-                ),
-              )
-            : Column(
-                children: _recentRides.map((ride) {
-                  final status = ride['status'];
-                  final isCompleted = status == RideStatus.completed.index;
-                  final isCancelled = status == RideStatus.cancelled.index;
-                  final fare = isCompleted ? ride['fare'] : 0.0;
-                  final date = ride['date'] != null ? DateTime.fromMillisecondsSinceEpoch(ride['date']) : null;
-                  return Card(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    elevation: 2,
-                    margin: const EdgeInsets.only(bottom: 10),
-                    child: ListTile(
-                      leading: Icon(
-                        isCompleted
-                            ? Icons.check_circle
-                            : isCancelled
-                            ? Icons.cancel
-                            : Icons.directions_car,
-                        color: isCompleted
-                            ? Colors.green
-                            : isCancelled
-                            ? Colors.red
-                            : AppColors.primary,
-                      ),
-                      title: Text('R ${fare.toStringAsFixed(2)}'),
-                      subtitle: Text(date != null ? '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}' : 'No date'),
-                      trailing: Text(
-                        isCompleted
-                            ? 'Completed'
-                            : isCancelled
-                            ? 'Cancelled'
-                            : 'Accepted',
-                        style: TextStyle(
-                          color: isCompleted
-                              ? Colors.green
-                              : isCancelled
-                              ? Colors.red
-                              : AppColors.primary,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppColors.getCardColor(isDark),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.getBorderColor(isDark), width: 1),
+          ),
+          child: Column(
+            children: [
+              Icon(Icons.history, color: AppColors.getTextHintColor(isDark), size: 48),
+              const SizedBox(height: 12),
+              Text(
+                'No recent rides',
+                style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 16, fontWeight: FontWeight.w500),
               ),
+              const SizedBox(height: 4),
+              Text('Your completed rides will appear here', style: TextStyle(color: AppColors.getTextHintColor(isDark), fontSize: 14)),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -1635,210 +1576,13 @@ class _OnlineStatusToggleState extends State<_OnlineStatusToggle> with SingleTic
   }
 }
 
-class _StatusCard extends StatelessWidget {
-  final bool isOnline;
-  final String address;
-  final bool isLoading;
-  final VoidCallback onRefresh;
-  final VoidCallback onToggle;
-  final bool isDark;
 
-  const _StatusCard({
-    required this.isOnline,
-    required this.address,
-    required this.isLoading,
-    required this.onRefresh,
-    required this.onToggle,
-    required this.isDark,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: isOnline ? AppColors.success : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              // Toggle button container with tooltip
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  GestureDetector(
-                    onTap: onToggle,
-                    child: Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: isOnline ? Colors.white.withOpacity(0.2) : AppColors.black.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          // Background circle
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: isOnline ? Colors.white : AppColors.black.withOpacity(0.1),
-                            ),
-                          ),
-                          // Inner circle (only visible when online)
-                          if (isOnline)
-                            Container(
-                              width: 16,
-                              height: 16,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: AppColors.success,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  // Tooltip with arrow
-                  if (!isOnline)
-                    Positioned(
-                      top: -60,
-                      left: -20,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.9),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.arrow_downward,
-                              color: Colors.white,
-                              size: 16,
-                            ),
-                            const SizedBox(width: 4),
-                            const Text(
-                              'Click here to go online',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  // Arrow pointing to button
-                  if (!isOnline)
-                    Positioned(
-                      top: -15,
-                      left: 15,
-                      child: CustomPaint(
-                        size: const Size(20, 15),
-                        painter: ArrowPainter(),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      isOnline ? 'You\'re Online' : 'You\'re Offline',
-                      style: TextStyle(
-                        color: isOnline ? Colors.white : AppColors.black,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      isOnline ? 'Ready to accept rides' : 'Go online to start earning',
-                      style: TextStyle(
-                        color: isOnline ? Colors.white.withOpacity(0.9) : AppColors.black.withOpacity(0.7),
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 16),
-
-          // Location
-          Row(
-            children: [
-              Icon(Icons.my_location, color: AppColors.black, size: 20),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  address.isNotEmpty ? address : 'Location not available',
-                  style: const TextStyle(color: AppColors.black, fontSize: 14, fontWeight: FontWeight.w500),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (isLoading)
-                const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: AppColors.black, strokeWidth: 2))
-              else
-                IconButton(
-                  onPressed: onRefresh,
-                  icon: const Icon(Icons.refresh, color: AppColors.black, size: 20),
-                  tooltip: 'Refresh Location',
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// Custom painter for the arrow
-class ArrowPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.black.withOpacity(0.9)
-      ..style = PaintingStyle.fill;
-
-    final path = Path()
-      ..moveTo(size.width / 2, size.height)
-      ..lineTo(0, 0)
-      ..lineTo(size.width, 0)
-      ..close();
-
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
 
 class _QuickActionsSection extends StatelessWidget {
-  final VoidCallback onViewRequests;
-  final VoidCallback onViewEarnings;
   final bool isDark;
+  final VoidCallback onViewRideRequests;
 
-  const _QuickActionsSection({required this.onViewRequests, required this.onViewEarnings, required this.isDark});
+  const _QuickActionsSection({required this.isDark, required this.onViewRideRequests});
 
   @override
   Widget build(BuildContext context) {
@@ -1853,11 +1597,38 @@ class _QuickActionsSection extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: _ActionCard(title: 'Ride Requests', subtitle: 'View available rides', icon: Icons.list_alt, color: AppColors.primary, onTap: onViewRequests, isDark: isDark),
+              child: _ActionCard(title: 'Ride Requests', subtitle: 'View available rides', icon: Icons.list_alt, color: AppColors.primary, onTap: onViewRideRequests, isDark: isDark),
             ),
             const SizedBox(width: 16),
             Expanded(
-              child: _ActionCard(title: 'Earnings', subtitle: 'View your earnings', icon: Icons.attach_money, color: AppColors.success, onTap: onViewEarnings, isDark: isDark),
+              child: _ActionCard(title: 'Earnings', subtitle: 'View your earnings', icon: Icons.attach_money, color: AppColors.success, onTap: () {
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EarningsScreen()));
+              }, isDark: isDark),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: _ActionCard(
+                title: 'Scheduled Requests', 
+                subtitle: 'View scheduled bookings', 
+                icon: Icons.schedule, 
+                color: AppColors.warning, 
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ScheduledRequestsSection(isDark: isDark),
+                    ),
+                  );
+                }, 
+                isDark: isDark
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Container(), // Empty space for future card
             ),
           ],
         ),
@@ -2207,4 +1978,202 @@ class _RecentRidesSection extends StatelessWidget {
       ],
     );
   }
+}
+
+class _StatusCard extends StatelessWidget {
+  final bool isOnline;
+  final String address;
+  final bool isLoading;
+  final VoidCallback onRefresh;
+  final VoidCallback onToggle;
+  final bool isDark;
+
+  const _StatusCard({
+    required this.isOnline,
+    required this.address,
+    required this.isLoading,
+    required this.onRefresh,
+    required this.onToggle,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: isOnline ? AppColors.success : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              // Toggle button container with tooltip
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  GestureDetector(
+                    onTap: onToggle,
+                    child: Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: isOnline ? Colors.white.withOpacity(0.2) : AppColors.black.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          // Background circle
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: isOnline ? Colors.white : AppColors.black.withOpacity(0.1),
+                            ),
+                          ),
+                          // Inner circle (only visible when online)
+                          if (isOnline)
+                            Container(
+                              width: 16,
+                              height: 16,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: AppColors.success,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Tooltip with arrow
+                  if (!isOnline)
+                    Positioned(
+                      top: -60,
+                      left: -20,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.9),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.arrow_downward,
+                              color: Colors.white,
+                              size: 16,
+                            ),
+                            const SizedBox(width: 4),
+                            const Text(
+                              'Click here to go online',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  // Arrow pointing to button
+                  if (!isOnline)
+                    Positioned(
+                      top: -15,
+                      left: 15,
+                      child: CustomPaint(
+                        size: const Size(20, 15),
+                        painter: ArrowPainter(),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isOnline ? 'You\'re Online' : 'You\'re Offline',
+                      style: TextStyle(
+                        color: isOnline ? Colors.white : AppColors.black,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      isOnline ? 'Ready to accept rides' : 'Go online to start earning',
+                      style: TextStyle(
+                        color: isOnline ? Colors.white.withOpacity(0.9) : AppColors.black.withOpacity(0.7),
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // Location
+          Row(
+            children: [
+              Icon(Icons.my_location, color: AppColors.black, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  address.isNotEmpty ? address : 'Location not available',
+                  style: const TextStyle(color: AppColors.black, fontSize: 14, fontWeight: FontWeight.w500),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (isLoading)
+                const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: AppColors.black, strokeWidth: 2))
+              else
+                IconButton(
+                  onPressed: onRefresh,
+                  icon: const Icon(Icons.refresh, color: AppColors.black, size: 20),
+                  tooltip: 'Refresh Location',
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Custom painter for the arrow
+class ArrowPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.black.withOpacity(0.9)
+      ..style = PaintingStyle.fill;
+
+    final path = Path()
+      ..moveTo(size.width / 2, size.height)
+      ..lineTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..close();
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

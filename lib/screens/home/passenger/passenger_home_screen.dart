@@ -1,5 +1,6 @@
 // lib/screens/home/passenger/passenger_home_screen.dart
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:gibelbibela/models/user_model.dart';
 import 'package:gibelbibela/screens/auth/login_screen.dart';
 import 'package:gibelbibela/screens/permissions/location_permission_screen.dart';
@@ -11,10 +12,17 @@ import '../../../constants/app_colors.dart';
 import '../../../providers/theme_provider.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/location_service.dart';
+import '../../../services/reminder_service.dart';
+import '../../../services/scheduled_reminder_service.dart';
 import '../../../widgets/common/modern_alert_dialog.dart';
 import '../../../widgets/common/modern_drawer.dart';
+import '../../../widgets/scheduled_reminder_dialog.dart';
+import '../../../widgets/floating_countdown_widget.dart';
+import '../../scheduled_booking_details_screen.dart';
 import 'profilescreen.dart';
 import 'request_ride_screen.dart';
+import 'scheduled_trip_screen.dart';
+import 'my_bookings_screen.dart';
 
 class PassengerHomeScreen extends StatefulWidget {
   final bool isFirstTime;
@@ -43,6 +51,11 @@ class _PassengerHomeScreenState extends State<PassengerHomeScreen> with TickerPr
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchAndSetUser();
       _checkLocationPermissions();
+      _startReminderService();
+      
+      // Initialize scheduled reminders
+      final reminderService = Provider.of<ScheduledReminderService>(context, listen: false);
+      reminderService.loadScheduledBookings();
     });
     _getCurrentLocation();
     if (widget.isFirstTime) {
@@ -96,13 +109,19 @@ class _PassengerHomeScreenState extends State<PassengerHomeScreen> with TickerPr
     // No setState() needed, provider will notify listeners
   }
 
+  Future<void> _startReminderService() async {
+    // Start the reminder service for scheduled bookings
+    ReminderService().startReminderService(context);
+  }
+
   Future<void> _checkLocationPermissions() async {
     // Skip permission check if we just came from the permission screen
     if (ModalRoute.of(context)?.settings.name == '/passenger_home') {
       return;
     }
 
-    final shouldShow = await PermissionService.shouldShowPermissionScreen();
+    // Use the more lenient permission check for passengers
+    final shouldShow = await PermissionService.shouldShowPermissionScreenForPassenger();
     if (shouldShow && mounted) {
       // Show permission screen as full screen instead of dialog
       await Navigator.of(context).push(
@@ -247,120 +266,150 @@ class _PassengerHomeScreenState extends State<PassengerHomeScreen> with TickerPr
   void dispose() {
     _fadeController.dispose();
     _slideController.dispose();
+    ReminderService().stopReminderService();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
+    final reminderService = Provider.of<ScheduledReminderService>(context);
     final isDark = themeProvider.isDarkMode;
 
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: AppColors.getBackgroundColor(isDark),
-      drawer: ModernDrawer(user: Provider.of<AuthService>(context).userModel, onProfileTap: _goToProfile, onLogout: () => handleDrawerLogout(context)),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Header
-            FadeTransition(
-              opacity: _fadeAnimation,
-              child: SlideTransition(
-                position: _slideAnimation,
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  child: Row(
-                    children: [
-                      // Menu Button
-                      _ModernIconButton(icon: Icons.menu, onPressed: _openDrawer, isDark: isDark),
+      drawer: ModernDrawer(
+        user: Provider.of<AuthService>(context).userModel,
+        onProfileTap: _goToProfile,
+        onLogout: () => handleDrawerLogout(context),
+      ),
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Column(
+              children: [
+                // Header
+                FadeTransition(
+                  opacity: _fadeAnimation,
+                  child: SlideTransition(
+                    position: _slideAnimation,
+                    child: Container(
+                      padding: const EdgeInsets.all(20),
+                      child: Row(
+                        children: [
+                          // Menu Button
+                          _ModernIconButton(icon: Icons.menu, onPressed: _openDrawer, isDark: isDark),
 
-                      const SizedBox(width: 16),
+                          const SizedBox(width: 16),
 
-                      // Welcome Text
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Welcome back!', style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 14)),
-                            const SizedBox(height: 4),
-                            Text(
-                              Provider.of<AuthService>(context).userModel?.fullName ?? 'User',
-                              style: TextStyle(color: AppColors.getTextPrimaryColor(isDark), fontSize: 20, fontWeight: FontWeight.bold),
+                          // Welcome Text
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Welcome back!', style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 14)),
+                                const SizedBox(height: 4),
+                                Text(
+                                  Provider.of<AuthService>(context).userModel?.fullName ?? 'User',
+                                  style: TextStyle(color: AppColors.getTextPrimaryColor(isDark), fontSize: 20, fontWeight: FontWeight.bold),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
-                      ),
+                          ),
 
-                      // Profile Avatar Button
-                      GestureDetector(
-                        onTap: _goToProfile,
-                        child: CircleAvatar(
-                          radius: 20,
-                          backgroundColor: Colors.white,
-                          backgroundImage: (_currentUser?.profileImageUrl != null && _currentUser!.profileImageUrl!.isNotEmpty) ? NetworkImage(_currentUser!.profileImageUrl!) : null,
-                          child: (_currentUser?.profileImageUrl == null || _currentUser!.profileImageUrl!.isEmpty) ? Icon(Icons.person_outline, color: AppColors.primary, size: 24) : null,
-                        ),
+                          // Profile Avatar Button
+                          GestureDetector(
+                            onTap: _goToProfile,
+                            child: CircleAvatar(
+                              radius: 20,
+                              backgroundColor: Colors.white,
+                              backgroundImage: (_currentUser?.profileImageUrl != null && _currentUser!.profileImageUrl!.isNotEmpty) ? NetworkImage(_currentUser!.profileImageUrl!) : null,
+                              child: (_currentUser?.profileImageUrl == null || _currentUser!.profileImageUrl!.isEmpty) ? Icon(Icons.person_outline, color: AppColors.primary, size: 24) : null,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-            ),
 
-            // Main Content
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Column(
-                  children: [
-                    // Location Card
-                    FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: SlideTransition(
-                        position: _slideAnimation,
-                        child: _LocationCard(address: _currentAddress, isLoading: _isLoading, onRefresh: _getCurrentLocation, isDark: isDark),
-                      ),
+                // Main Content
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(
+                      children: [
+                        // Location Card
+                        FadeTransition(
+                          opacity: _fadeAnimation,
+                          child: SlideTransition(
+                            position: _slideAnimation,
+                            child: _LocationCard(address: _currentAddress, isLoading: _isLoading, onRefresh: _getCurrentLocation, isDark: isDark),
+                          ),
+                        ),
+
+                        const SizedBox(height: 30),
+
+                        // Quick Actions
+                        FadeTransition(
+                          opacity: _fadeAnimation,
+                          child: SlideTransition(
+                            position: _slideAnimation,
+                            child: _QuickActionsSection(onRequestRide: _requestRide, isDark: isDark),
+                          ),
+                        ),
+
+                        const SizedBox(height: 30),
+
+                        // Recent Rides
+                        FadeTransition(
+                          opacity: _fadeAnimation,
+                          child: SlideTransition(
+                            position: _slideAnimation,
+                            child: _RecentRidesSection(isDark: isDark),
+                          ),
+                        ),
+
+                        const SizedBox(height: 30),
+
+                        // Features Section
+                        FadeTransition(
+                          opacity: _fadeAnimation,
+                          child: SlideTransition(
+                            position: _slideAnimation,
+                            child: _FeaturesSection(isDark: isDark),
+                          ),
+                        ),
+
+                        const SizedBox(height: 30),
+                      ],
                     ),
-
-                    const SizedBox(height: 30),
-
-                    // Quick Actions
-                    FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: SlideTransition(
-                        position: _slideAnimation,
-                        child: _QuickActionsSection(onRequestRide: _requestRide, isDark: isDark),
-                      ),
-                    ),
-
-                    const SizedBox(height: 30),
-
-                    // Recent Rides
-                    FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: SlideTransition(
-                        position: _slideAnimation,
-                        child: _RecentRidesSection(isDark: isDark),
-                      ),
-                    ),
-
-                    const SizedBox(height: 30),
-
-                    // Features Section
-                    FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: SlideTransition(
-                        position: _slideAnimation,
-                        child: _FeaturesSection(isDark: isDark),
-                      ),
-                    ),
-
-                    const SizedBox(height: 30),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
-          ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReminderDialog(ScheduledReminderService reminderService) {
+    return ScheduledReminderDialog(
+      reminder: reminderService.currentReminder!,
+      onDismiss: () => reminderService.dismissReminder(),
+      onViewDetails: () => _openBookingDetails(reminderService.currentReminder!['id']),
+    );
+  }
+
+  void _openBookingDetails(String bookingId) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ScheduledBookingDetailsScreen(
+          bookingId: bookingId,
+          isDriver: false,
         ),
       ),
     );
@@ -510,13 +559,51 @@ class _QuickActionsSection extends StatelessWidget {
             const SizedBox(width: 16),
             Expanded(
               child: _ActionCard(
-                title: 'Ride History',
-                subtitle: 'View past rides',
-                icon: Icons.history,
+                title: 'Scheduled Trip',
+                subtitle: 'Book for later',
+                icon: Icons.schedule,
                 color: AppColors.secondary,
                 onTap: () {
-                  // TODO: Implement ride history
-                  ModernSnackBar.show(context, message: 'Ride history coming soon!');
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => const ScheduledTripScreen(),
+                    ),
+                  );
+                },
+                isDark: isDark,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: _ActionCard(
+                title: 'My Bookings',
+                subtitle: 'View all bookings',
+                icon: Icons.book_online,
+                color: Colors.orange,
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => const MyBookingsScreen(),
+                    ),
+                  );
+                },
+                isDark: isDark,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: _ActionCard(
+                title: 'Saved Places',
+                subtitle: 'Quick access',
+                icon: Icons.bookmark,
+                color: Colors.purple,
+                onTap: () {
+                  // TODO: Implement saved places
+                  ModernSnackBar.show(context, message: 'Saved places coming soon!');
                 },
                 isDark: isDark,
               ),

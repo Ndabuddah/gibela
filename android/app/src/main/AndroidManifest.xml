@@ -32,7 +32,8 @@
     <application
         android:label="Ride Asambe"
         android:name="${applicationName}"
-        android:icon="@mipmap/ride">
+        android:icon="@mipmap/ride"
+        android:enableOnBackInvokedCallback="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -8,6 +8,7 @@ import 'package:gibelbibela/services/database_service.dart';
 import 'package:gibelbibela/services/location_service.dart';
 import 'package:gibelbibela/services/notification_service.dart';
 import 'package:gibelbibela/services/ride_service.dart';
+import 'package:gibelbibela/services/scheduled_reminder_service.dart';
 import 'package:provider/provider.dart';
 
 import 'app.dart';
@@ -30,6 +31,7 @@ void main() async {
         ChangeNotifierProvider(create: (_) => RideService()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => NotificationService()),
+        ChangeNotifierProvider(create: (_) => ScheduledReminderService()),
         Provider(
           create: (_) => CloudinaryService(
             cloudName: 'dunfw4ifc',

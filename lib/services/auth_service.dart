@@ -165,8 +165,22 @@ class AuthService extends ChangeNotifier {
   }
 
   // Add missing methods for compatibility
-  Future<UserCredential> signInWithEmailAndPassword(String email, String password) {
-    return _auth.signInWithEmailAndPassword(email: email, password: password);
+  Future<UserCredential> signInWithEmailAndPassword(String email, String password) async {
+    try {
+      print('🔐 AuthService: Starting sign in for email: $email');
+      print('🔐 AuthService: Checking Firebase Auth instance...');
+      print('🔐 AuthService: Firebase Auth initialized: ${_auth.app != null}');
+      
+      final userCredential = await _auth.signInWithEmailAndPassword(email: email, password: password);
+      print('✅ AuthService: Sign in successful for user: ${userCredential.user?.uid}');
+      return userCredential;
+    } on FirebaseAuthException catch (e) {
+      print('❌ AuthService: FirebaseAuthException - Code: ${e.code}, Message: ${e.message}');
+      rethrow;
+    } catch (e) {
+      print('❌ AuthService: General error during sign in: $e');
+      rethrow;
+    }
   }
 
   Future<UserCredential> createUserWithEmailAndPassword(String email, String password) async {

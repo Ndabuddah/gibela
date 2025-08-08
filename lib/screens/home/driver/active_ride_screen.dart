@@ -303,6 +303,20 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
 
 // Start the trip (after arriving at pickup) - UPDATED TO USE ADDRESS
   Future<void> _startTrip() async {
+    // Guard: ensure driver marked arrived first
+    if (!_hasArrived) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please mark as arrived before starting the trip.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    
+      return;
+    }
+
     // Cancel timers
     _waitingTimer?.cancel();
     _chargingTimer?.cancel();
@@ -378,6 +392,12 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
       final baseFare = widget.ride.actualFare ?? widget.ride.estimatedFare;
       final totalFare = baseFare + _waitingCharge;
 
+      // Show completion message
+      String completionMessage = 'Trip completed! Earnings: R${totalFare.toStringAsFixed(2)}';
+      if (_waitingCharge > 0) {
+        completionMessage += ' (includes R${_waitingCharge.toStringAsFixed(2)} waiting charge)';
+      }
+
       // Use the new completion method that tracks earnings
       final rideService = RideService();
       await rideService.completeRide(widget.ride.id, totalFare);
@@ -389,6 +409,14 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
         _flowState = RideFlowState.completed;
         _isLoading = false;
       });
+
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(completionMessage),
+          backgroundColor: Colors.green,
+        ),
+      );
 
       // Show rating dialog
       _showRatingDialog();
@@ -836,13 +864,14 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
             ),
           ),
 
-        // Start Trip Button
-        _buildNavigationButton(
-          onPressed: _startTrip,
-          text: 'Start Trip',
-          icon: Icons.directions_car,
-          backgroundColor: Colors.green,
-        ),
+        // Start Trip Button (only after arrived)
+        if (_hasArrived)
+          _buildNavigationButton(
+            onPressed: _startTrip,
+            text: 'Start Trip',
+            icon: Icons.directions_car,
+            backgroundColor: Colors.green,
+          ),
       ],
     );
   }

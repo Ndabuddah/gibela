@@ -20,6 +20,7 @@ import '../../widgets/common/loading_indicator.dart';
 import '../../widgets/driver/document_upload.dart';
 import '../../utils/validators.dart';
 import 'congratulations_screen.dart';
+import '../home/driver/driver_home_screen.dart';
 
 class DriverSignupScreen extends StatefulWidget {
   const DriverSignupScreen({Key? key}) : super(key: key);
@@ -40,8 +41,8 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
   ];
   final Map<String, String> _purposeInfo = {
     '1-2 seater': 'These are small vehicles that can only take 1 or 2 passengers.',
-    '1-4 seater': 'Standard vehicles that can take up to 4 passengers.',
-    '7 seater': 'Larger vehicles that can take up to 7 passengers.',
+    '1-4 seater': 'Standard vehicles that can take up to 3 passengers.',
+    '7 seater': 'Larger vehicles that can take up to 6 passengers.',
     'students': 'Only students can select this. You will only be matched with student passengers.',
     'luxury': 'High-end vehicles for premium rides.',
     'packages': 'Anyone can select this. For delivering packages.',
@@ -248,8 +249,33 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
   @override
   void initState() {
     super.initState();
+    _checkDriverStatus();
     _loadSavedProgress();
     _addTextChangeListeners();
+  }
+
+  // Check if driver is already approved and redirect if necessary
+  Future<void> _checkDriverStatus() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final databaseService = Provider.of<DatabaseService>(context, listen: false);
+        final userModel = await databaseService.getUserById(user.uid);
+        
+        if (userModel != null && userModel.isDriver && userModel.isApproved) {
+          // Driver is already approved, redirect to home screen
+          if (mounted) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => const DriverHomeScreen(),
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      print('Error checking driver status: $e');
+    }
   }
 
   // Add text change listeners to save progress as user types
@@ -772,10 +798,10 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
         return;
       }
 
-      // Determine driver preferences based on selected purposes
-      final isFemale = _selectedPurposes.contains('females');
-      final isForStudents = _selectedPurposes.contains('students');
-      final isLuxury = _selectedPurposes.contains('luxury');
+      // Set all special flags to false by default - only admin can change these
+      final isFemale = false;
+      final isForStudents = false;
+      final isLuxury = false;
       final isMax2 = _selectedPurposes.contains('1-2 seater');
 
       // Create driver model

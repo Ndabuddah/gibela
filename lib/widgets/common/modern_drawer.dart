@@ -9,12 +9,14 @@ import '../../screens/about_driver/about_driver_screen.dart';
 import '../../screens/auth/login_screen.dart';
 import '../../screens/driver/ride_history_screen.dart' as driver_history;
 import '../../screens/help/help_screen.dart';
-import '../../screens/payments/payments_screen.dart';
+import '../../screens/home/driver/driver_scheduled_bookings_screen.dart';
 import '../../screens/settings/settings_screen.dart';
+import '../../screens/home/driver/driver_settings_screen.dart';
+import '../../screens/emergency/panic_alert_screen.dart';
 import '../../services/auth_service.dart';
 import '../../services/database_service.dart';
 
-class ModernDrawer extends StatelessWidget {
+class ModernDrawer extends StatefulWidget {
   final UserModel? user;
   final VoidCallback? onProfileTap;
   final VoidCallback? onRidesTap;
@@ -33,10 +35,48 @@ class ModernDrawer extends StatelessWidget {
   }) : super(key: key);
 
   @override
+  State<ModernDrawer> createState() => _ModernDrawerState();
+}
+
+class _ModernDrawerState extends State<ModernDrawer> {
+  String? _cachedProfileImageUrl;
+  bool _isLoadingProfileImage = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfileImage();
+  }
+
+  Future<void> _loadProfileImage() async {
+    if (widget.user?.isDriver == true && _cachedProfileImageUrl == null) {
+      setState(() {
+        _isLoadingProfileImage = true;
+      });
+      
+      try {
+        final profileImageUrl = await DatabaseService().getDriverProfileImage(widget.user!.uid);
+        if (mounted) {
+          setState(() {
+            _cachedProfileImageUrl = profileImageUrl;
+            _isLoadingProfileImage = false;
+          });
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _isLoadingProfileImage = false;
+          });
+        }
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final isDark = themeProvider.isDarkMode;
-    final profileImageUrl = user?.profileImageUrl;
+    final profileImageUrl = widget.user?.profileImageUrl;
 
     Future<bool> _showLogoutConfirmationDialog(BuildContext context) {
       return showDialog<bool>(
@@ -70,15 +110,15 @@ class ModernDrawer extends StatelessWidget {
             padding: EdgeInsets.zero,
             children: [
               UserAccountsDrawerHeader(
-                accountName: Text(user?.fullName ?? 'Guest', style: const TextStyle(fontWeight: FontWeight.bold)),
-                accountEmail: Text(user?.email ?? '', style: const TextStyle(fontSize: 12)),
-                currentAccountPicture: _buildDrawerProfileAvatar(user),
+                accountName: Text(widget.user?.fullName ?? 'Guest', style: const TextStyle(fontWeight: FontWeight.bold)),
+                accountEmail: Text(widget.user?.email ?? '', style: const TextStyle(fontSize: 12)),
+                currentAccountPicture: _buildDrawerProfileAvatar(widget.user),
                 decoration: BoxDecoration(
                   color: AppColors.primary,
                 ),
               ),
 
-              if (user?.isDriver ?? false) ...[
+              if (widget.user?.isDriver ?? false) ...[
                 _DrawerItem(
                   icon: Icons.history,
                   title: 'Ride History',
@@ -102,14 +142,15 @@ class ModernDrawer extends StatelessWidget {
               //   isDark: isDark,
               // ),
               ,
-              _DrawerItem(
-                icon: Icons.credit_card,
-                title: 'Payments',
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const PaymentsScreen()),
+              if (widget.user?.isDriver ?? false)
+                _DrawerItem(
+                  icon: Icons.schedule,
+                  title: 'Scheduled Bookings',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => DriverScheduledBookingsScreen(isDark: isDark)),
+                  ),
+                  isDark: isDark,
                 ),
-                isDark: isDark,
-              ),
               _DrawerItem(
                 icon: Icons.support_agent,
                 title: 'Support',
@@ -125,7 +166,7 @@ class ModernDrawer extends StatelessWidget {
                 },
                 isDark: isDark,
               ),
-              if (user?.isDriver ?? false)
+              if (widget.user?.isDriver ?? false)
                 _DrawerItem(
                   icon: Icons.info_outline,
                   title: 'About Driver',
@@ -139,9 +180,19 @@ class ModernDrawer extends StatelessWidget {
               _DrawerItem(
                 icon: Icons.settings_outlined,
                 title: 'Settings',
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                ),
+                onTap: () {
+                  if (widget.user?.isDriver ?? false) {
+                    // Navigate to driver settings for drivers
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const DriverSettingsScreen()),
+                    );
+                  } else {
+                    // Navigate to regular settings for passengers
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                    );
+                  }
+                },
                 isDark: isDark,
               ),
               _DrawerItem(
@@ -227,9 +278,10 @@ class ModernDrawer extends StatelessWidget {
             icon: const Icon(Icons.warning_amber_rounded, color: Colors.white),
             label: const Text('Panic', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             onPressed: () {
-              // TODO: Implement panic action
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Panic button pressed! Emergency services will be contacted.')),
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const PanicAlertScreen(),
+                ),
               );
             },
           ),
@@ -254,42 +306,39 @@ class ModernDrawer extends StatelessWidget {
         );
       }
     }
-    // Driver logic unchanged
+    
+    // For drivers, use cached profile image
+    if (user?.isDriver == true && _cachedProfileImageUrl != null && _cachedProfileImageUrl!.isNotEmpty) {
+      return CircleAvatar(
+        backgroundColor: Colors.white,
+        backgroundImage: NetworkImage(_cachedProfileImageUrl!),
+      );
+    }
+    
+    // Use regular profile image URL for drivers
     final profileImageUrl = user?.profileImageUrl;
     if (profileImageUrl != null && profileImageUrl.isNotEmpty) {
       return CircleAvatar(
         backgroundColor: Colors.white,
         backgroundImage: NetworkImage(profileImageUrl),
       );
-    } else if (user != null && user.isDriver) {
-      return FutureBuilder<String?>(
-        future: DatabaseService().getDriverProfileImage(user.uid),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const CircleAvatar(
-              backgroundColor: Colors.white,
-              child: Icon(Icons.person, size: 40, color: AppColors.primary),
-            );
-          }
-          final driverImage = snapshot.data;
-          if (driverImage != null && driverImage.isNotEmpty) {
-            return CircleAvatar(
-              backgroundColor: Colors.white,
-              backgroundImage: NetworkImage(driverImage),
-            );
-          }
-          return const CircleAvatar(
-            backgroundColor: Colors.white,
-            child: Icon(Icons.person, size: 40, color: AppColors.primary),
-          );
-        },
-      );
-    } else {
+    }
+    
+    // Show loading or default avatar for drivers
+    if (user?.isDriver == true && _isLoadingProfileImage) {
       return const CircleAvatar(
         backgroundColor: Colors.white,
-        child: Icon(Icons.person, size: 40, color: AppColors.primary),
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+        ),
       );
     }
+    
+    return const CircleAvatar(
+      backgroundColor: Colors.white,
+      child: Icon(Icons.person, size: 40, color: AppColors.primary),
+    );
   }
 }
 

@@ -14,8 +14,11 @@ import '../auth/passenger_registration_screen.dart';
 import '../home/driver/driver_home_screen.dart';
 import '../auth/driver_signup_screen.dart';
 import '../home/passenger/passenger_home_screen.dart';
+import '../home/driver_no_car/driver_no_car_home_screen.dart';
+import '../home/car_owner/car_owner_home_screen.dart';
 import '../onboarding/onboarding_screen.dart';
 import '../payments/payment_screen.dart';
+import '../auth/email_verification_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -103,10 +106,25 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
     } else {
       // User is logged in, check their verification and registration status
       try {
-        // Removed _silentlyCheckEmailVerification(user) - no need to check email verification on every startup
-
+        // Check email verification status using Firebase Auth
+        await user.reload();
+        final refreshedUser = FirebaseAuth.instance.currentUser;
+        
         // Email is verified, now check registration completion
         final userModel = await Provider.of<DatabaseService>(context, listen: false).getUserById(user.uid);
+
+        if (refreshedUser == null || !refreshedUser.emailVerified) {
+          print('📧 Email not verified, redirecting to verification screen...');
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => EmailVerificationScreen(
+                user: refreshedUser ?? user,
+                isDriver: userModel?.isDriver ?? false,
+              ),
+            ),
+          );
+          return;
+        }
 
         if (!mounted) return;
 
@@ -121,6 +139,28 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
         if (userModel.isDriver) {
           print('🚗 User is a driver, checking access...');
           
+          // Check for specific user roles
+          if (userModel.userRole == 'driver_no_car') {
+            print('🚗 User is a driver without car, going to no-car home screen');
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => DriverNoCarHomeScreen(userModel: userModel),
+              ),
+            );
+            return;
+          }
+          
+          if (userModel.userRole == 'car_owner') {
+            print('🚗 User is a car owner, going to car owner home screen');
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => CarOwnerHomeScreen(userModel: userModel),
+              ),
+            );
+            return;
+          }
+          
+          // Regular driver flow
           final driverAccessService = DriverAccessService();
           final accessCheck = await driverAccessService.checkDriverAccess(user.uid);
           
@@ -128,6 +168,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
           print('- Can Access: ${accessCheck['canAccess']}');
           print('- Status: ${accessCheck['status']}');
           print('- Reason: ${accessCheck['reason']}');
+          print('- Is Approved: ${accessCheck['isApproved']}');
           
           // If signup is required, redirect to driver signup
           if (accessCheck['status'] == 'signup_required') {
@@ -162,8 +203,11 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
             return;
           }
 
-          // Always send drivers to home screen - let home screen handle validation
+
+
+          // Drivers can access the app (approved or awaiting approval)
           print('✅ Driver going to home screen');
+          print('- Can Access: ${accessCheck['canAccess']}');
           print('- Is Approved: ${accessCheck['isApproved']}');
           print('- Status: ${accessCheck['status']}');
           

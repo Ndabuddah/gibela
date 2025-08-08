@@ -32,63 +32,136 @@ class RideFilterService {
     required Position driverLocation,
     required DriverModel driver,
   }) {
+    print('🔍 Starting ride filtering for driver: ${driver.name}');
+    print('📍 Driver location: ${driverLocation.latitude}, ${driverLocation.longitude}');
+    print('🚗 Driver vehicle type: ${driver.vehicleType}');
+    
     return _firestore
-        .collection('rides')
-        .where('status', isEqualTo: RideStatus.requested.index)
-        .orderBy('requestTime', descending: false)
+        .collection('requests')
+        .where('status', isEqualTo: 'pending')
+        .orderBy('createdAt', descending: false)
         .snapshots()
+        .handleError((error) {
+          print('❌ Error in ride filtering: $error');
+          // If it's an index error, provide a helpful message
+          if (error.toString().contains('FAILED_PRECONDITION') || 
+              error.toString().contains('requires an index')) {
+            print('⚠️ Firestore index is still building. This may take a few minutes.');
+            // Return empty list while index is building
+            return const Stream.empty();
+          }
+          // For other errors, rethrow
+          throw error;
+        })
         .map((snapshot) {
+      print('📊 Found ${snapshot.docs.length} total ride requests in database');
+      
+      // Debug: Print the first few documents to see their structure
+      if (snapshot.docs.isNotEmpty) {
+        print('🔍 First document structure: ${snapshot.docs.first.data()}');
+      }
+      
       final List<RideModel> allRides = snapshot.docs
           .map((doc) => RideModel.fromMap(doc.data(), doc.id))
           .toList();
 
-      // Apply filtering rules
-      final List<RideModel> filteredRides = allRides.where((ride) {
-        return _shouldShowRideToDriver(ride, driver, driverLocation);
-      }).toList();
+      // Apply filtering rules with progressive distance expansion
+      final List<RideModel> filteredRides = _applyProgressiveDistanceFilter(
+        allRides, 
+        driver, 
+        driverLocation
+      );
 
-      // Sort by distance (closest first)
-      filteredRides.sort((a, b) {
-        final distanceA = calculateDistance(
-          driverLocation.latitude,
-          driverLocation.longitude,
-          a.pickupLat,
-          a.pickupLng,
-        );
-        final distanceB = calculateDistance(
-          driverLocation.latitude,
-          driverLocation.longitude,
-          b.pickupLat,
-          b.pickupLng,
-        );
-        return distanceA.compareTo(distanceB);
-      });
+      print('✅ After filtering: ${filteredRides.length} rides available for driver');
 
       return filteredRides;
     });
   }
 
-  // Check if a ride should be shown to a specific driver
-  bool _shouldShowRideToDriver(RideModel ride, DriverModel driver, Position driverLocation) {
-    // Calculate distance from driver to pickup location
-    final double distance = calculateDistance(
-      driverLocation.latitude,
-      driverLocation.longitude,
-      ride.pickupLat,
-      ride.pickupLng,
-    );
+  // Apply progressive distance filtering
+  List<RideModel> _applyProgressiveDistanceFilter(
+    List<RideModel> allRides, 
+    DriverModel driver, 
+    Position driverLocation
+  ) {
+    final now = DateTime.now();
+    final List<RideModel> filteredRides = [];
+    
+    print('🔍 Progressive distance filtering started');
+    print('📊 Total rides to filter: ${allRides.length}');
+    
+    // First pass: Get all rides that pass basic filtering (excluding distance)
+    final basicFilteredRides = allRides.where((ride) {
+      return _shouldShowRideToDriverBasic(ride, driver, driverLocation);
+    }).toList();
+    
+    print('📊 Rides after basic filtering: ${basicFilteredRides.length}');
+    
+    // Calculate distances for all rides
+    final ridesWithDistance = basicFilteredRides.map((ride) {
+      final distance = calculateDistance(
+        driverLocation.latitude,
+        driverLocation.longitude,
+        ride.pickupLat,
+        ride.pickupLng,
+      );
+      return {'ride': ride, 'distance': distance};
+    }).toList();
+    
+    // Sort by distance
+    ridesWithDistance.sort((a, b) => (a['distance'] as double).compareTo(b['distance'] as double));
+    
+    // Track expansion statistics
+    int ridesWithin1km = 0;
+    int ridesWithin3km = 0;
+    int ridesWithin10km = 0;
+    
+    // Progressive distance expansion based on request age
+    for (final rideData in ridesWithDistance) {
+      final ride = rideData['ride'] as RideModel;
+      final distance = rideData['distance'] as double;
+      final requestAge = now.difference(ride.requestTime).inMinutes;
+      
+      // Determine max distance based on request age
+      double maxDistance;
+      if (requestAge < 2) {
+        maxDistance = 1.0; // Start with 1km for new requests
+      } else if (requestAge < 5) {
+        maxDistance = 3.0; // Expand to 3km after 2 minutes
+      } else {
+        maxDistance = 10.0; // Expand to 10km after 5 minutes
+      }
+      
+      if (distance <= maxDistance) {
+        filteredRides.add(ride);
+        
+        // Track statistics
+        if (distance <= 1.0) ridesWithin1km++;
+        if (distance <= 3.0) ridesWithin3km++;
+        if (distance <= 10.0) ridesWithin10km++;
+        
+        print('✅ Ride ${ride.id} included: ${distance.toStringAsFixed(2)}km (age: ${requestAge}min, max: ${maxDistance}km)');
+      } else {
+        print('❌ Ride ${ride.id} filtered out: ${distance.toStringAsFixed(2)}km > ${maxDistance}km (age: ${requestAge}min)');
+      }
+    }
+    
+    print('📊 Progressive expansion results:');
+    print('   - Rides within 1km: $ridesWithin1km');
+    print('   - Rides within 3km: $ridesWithin3km');
+    print('   - Rides within 10km: $ridesWithin10km');
+    print('   - Total rides shown: ${filteredRides.length}');
+    
+    return filteredRides;
+  }
 
+  // Check if a ride should be shown to a specific driver (basic filtering without distance)
+  bool _shouldShowRideToDriverBasic(RideModel ride, DriverModel driver, Position driverLocation) {
     // Debug logging for ride filtering
-    print('🚗 Ride ${ride.id}: Distance ${distance.toStringAsFixed(2)}km from driver');
+    print('🚗 Ride ${ride.id}: Basic filtering check');
     print('   Driver location: ${driverLocation.latitude}, ${driverLocation.longitude}');
     print('   Pickup location: ${ride.pickupLat}, ${ride.pickupLng}');
     print('   Vehicle type: ${ride.vehicleType} vs Driver: ${driver.vehicleType}');
-
-    // Distance-based filtering (progressive distance expansion)
-    if (!_isWithinDistanceRange(distance)) {
-      print('   ❌ Filtered out: Distance ${distance.toStringAsFixed(2)}km > 10km limit');
-      return false;
-    }
 
     // Asambe Girl filtering
     if (ride.isAsambeGirl && (driver.isFemale != true)) {
@@ -120,22 +193,44 @@ class RideFilterService {
       return false;
     }
 
-    print('   ✅ Ride will be shown to driver');
+    print('   ✅ Ride passes basic filtering');
     return true;
   }
 
+  // Check if a ride should be shown to a specific driver (legacy method for backward compatibility)
+  bool _shouldShowRideToDriver(RideModel ride, DriverModel driver, Position driverLocation) {
+    // Calculate distance from driver to pickup location
+    final double distance = calculateDistance(
+      driverLocation.latitude,
+      driverLocation.longitude,
+      ride.pickupLat,
+      ride.pickupLng,
+    );
+
+    // Debug logging for ride filtering
+    print('🚗 Ride ${ride.id}: Distance ${distance.toStringAsFixed(2)}km from driver');
+
+    // Distance-based filtering (progressive distance expansion)
+    if (!_isWithinDistanceRange(distance)) {
+      print('   ❌ Filtered out: Distance ${distance.toStringAsFixed(2)}km > 10km limit');
+      return false;
+    }
+
+    // Use basic filtering
+    return _shouldShowRideToDriverBasic(ride, driver, driverLocation);
+  }
+
   // Check if distance is within acceptable range (progressive expansion)
-  bool _isWithinDistanceRange(double distance) {
-    // First priority: within 1km
-    if (distance <= 1.0) return true;
-    
-    // Second priority: within 3km
-    if (distance <= 3.0) return true;
-    
-    // Third priority: within 10km
-    if (distance <= 10.0) return true;
-    
-    return false;
+  bool _isWithinDistanceRange(double distance, {double maxDistance = 10.0}) {
+    return distance <= maxDistance;
+  }
+
+  // Get distance-based priority for ride requests (legacy method)
+  int _getDistancePriority(double distance) {
+    if (distance <= 1.0) return 1; // Highest priority
+    if (distance <= 3.0) return 2; // Medium priority
+    if (distance <= 10.0) return 3; // Lower priority
+    return 4; // Lowest priority
   }
 
   // Check vehicle type compatibility
@@ -185,13 +280,7 @@ class RideFilterService {
     }
   }
 
-  // Get distance-based priority for ride requests
-  int _getDistancePriority(double distance) {
-    if (distance <= 1.0) return 1; // Highest priority
-    if (distance <= 3.0) return 2; // Medium priority
-    if (distance <= 10.0) return 3; // Lower priority
-    return 4; // Lowest priority
-  }
+
 
   // Get filtered and prioritized ride requests
   Stream<List<RideModel>> getPrioritizedRideRequests({
@@ -204,30 +293,36 @@ class RideFilterService {
       driverLocation: driverLocation,
       driver: driver,
     ).map((rides) {
-      // Group rides by distance priority
-      final Map<int, List<RideModel>> priorityGroups = {};
+      // The rides are already sorted by distance and filtered with progressive expansion
+      // Just add some additional prioritization based on request age and distance
+      final List<RideModel> prioritizedRides = List.from(rides);
       
-      for (final ride in rides) {
-        final distance = calculateDistance(
+      // Sort by a combination of distance and request age
+      prioritizedRides.sort((a, b) {
+        final distanceA = calculateDistance(
           driverLocation.latitude,
           driverLocation.longitude,
-          ride.pickupLat,
-          ride.pickupLng,
+          a.pickupLat,
+          a.pickupLng,
         );
-        final priority = _getDistancePriority(distance);
+        final distanceB = calculateDistance(
+          driverLocation.latitude,
+          driverLocation.longitude,
+          b.pickupLat,
+          b.pickupLng,
+        );
         
-        priorityGroups.putIfAbsent(priority, () => []);
-        priorityGroups[priority]!.add(ride);
-      }
-
-      // Combine rides in priority order
-      final List<RideModel> prioritizedRides = [];
-      for (int priority = 1; priority <= 3; priority++) {
-        if (priorityGroups.containsKey(priority)) {
-          prioritizedRides.addAll(priorityGroups[priority]!);
+        // Prioritize by distance first, then by request age (older requests get priority)
+        final distanceComparison = distanceA.compareTo(distanceB);
+        if (distanceComparison != 0) {
+          return distanceComparison;
         }
-      }
+        
+        // If distances are equal, prioritize older requests
+        return a.requestTime.compareTo(b.requestTime);
+      });
 
+      print('🎯 Prioritized ${prioritizedRides.length} rides for driver');
       return prioritizedRides;
     });
   }

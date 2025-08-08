@@ -18,6 +18,7 @@ import '../../../services/auth_service.dart';
 import '../../../services/location_service.dart';
 import '../../../services/ride_filter_service.dart';
 import './active_ride_screen.dart';
+import './driver_settings_screen.dart';
 import 'dart:ui'; // Added for ImageFilter
 
 import '../../../widgets/common/loading_indicator.dart';
@@ -53,6 +54,69 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
     });
   }
 
+  // Check if driver has profile picture
+  Future<void> _checkProfilePicture() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      if (userDoc.exists) {
+        final userData = userDoc.data() as Map<String, dynamic>;
+        final profileImage = userData['profileImage'] as String?;
+        
+        if (profileImage == null || profileImage.isEmpty) {
+          // Show profile picture prompt
+          if (mounted) {
+            _showProfilePicturePrompt();
+          }
+        }
+      }
+    } catch (e) {
+      print('Error checking profile picture: $e');
+    }
+  }
+
+  void _showProfilePicturePrompt() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.camera_alt, color: AppColors.primary),
+            SizedBox(width: 8),
+            Text('Profile Picture Required'),
+          ],
+        ),
+        content: const Text(
+          'You need to add a profile picture to view ride requests. This helps passengers identify you.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _navigateToProfilePicture();
+            },
+            child: const Text('Take Photo Now'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _navigateToProfilePicture() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const DriverSettingsScreen(),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     super.dispose();
@@ -80,18 +144,33 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
     }
   }
 
-  Future<void> _onAcceptRidePressed(String docId, Map<String, dynamic> data, String driverId) async {
-    if (!mounted) return;
+  Future<void> _acceptRide(String docId, Map<String, dynamic> data) async {
+    // Validate driver ID
+    final driverId = FirebaseAuth.instance.currentUser?.uid;
+    if (driverId == null) {
+      _showErrorSnackBar('Driver authentication error. Please log in again.');
+      return;
+    }
+    
+    // Validate driver ID
+    if (driverId.isEmpty) {
+      _showErrorSnackBar('Driver ID is missing. Please try again.');
+      return;
+    }
     
     setState(() => _processing.add(docId));
     
     try {
+      print('🔄 Accepting ride request: $docId');
+      
       // Convert to RideModel
       final ride = RideModel.fromMap(data, docId);
       
       // Use RideService to accept the ride
       final rideService = RideService();
       await rideService.acceptRideRequest(ride.id, driverId);
+      
+      print('✅ Ride accepted successfully: $docId');
       
       // Navigate to ActiveRideScreen
       if (!mounted) return;
@@ -108,6 +187,7 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
       });
       
     } catch (e, stackTrace) {
+      print('❌ Error accepting ride: $e');
       developer.log('Error accepting ride: $e', 
         name: 'RideAccept',
         error: e,
@@ -151,6 +231,7 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
       final authService = Provider.of<AuthService>(context, listen: false);
       final user = authService.userModel;
       if (user != null) {
+        print('👤 Loading driver data for user: ${user.uid}');
         final driverDoc = await FirebaseFirestore.instance
             .collection('users')
             .doc(user.uid)
@@ -158,13 +239,46 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
         
         if (driverDoc.exists) {
           final driverData = driverDoc.data() as Map<String, dynamic>;
+          final driver = DriverModel.fromMap(driverData);
           setState(() {
-            _currentDriver = DriverModel.fromMap(driverData);
+            _currentDriver = driver;
           });
+          print('✅ Driver loaded successfully: ${driver.name}');
+        } else {
+          print('❌ Driver document not found for user: ${user.uid}');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Driver profile not found. Please complete your profile.'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      } else {
+        print('❌ No authenticated user found');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Please log in to view ride requests.'),
+              backgroundColor: Colors.red,
+            ),
+          );
         }
       }
+      
+      // Check profile picture after loading driver
+      await _checkProfilePicture();
     } catch (e) {
-      print('Error loading current driver: $e');
+      print('❌ Error loading current driver: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error loading driver data: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -199,14 +313,37 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
         }
         
         if (snapshot.hasError) {
+          final error = snapshot.error;
+          print('❌ Ride request list error: $error');
+          
+          String errorMessage = 'Error loading ride requests';
+          String errorDetails = 'Please check your connection and try again';
+          
+          // Check if it's an index building error
+          if (error.toString().contains('FAILED_PRECONDITION') || 
+              error.toString().contains('requires an index')) {
+            errorMessage = 'Setting up ride requests';
+            errorDetails = 'This may take a few minutes. Please wait...';
+          } else if (error.toString().contains('permission-denied')) {
+            errorMessage = 'Access denied';
+            errorDetails = 'Please check your driver approval status';
+          } else if (error.toString().contains('unavailable')) {
+            errorMessage = 'Service temporarily unavailable';
+            errorDetails = 'Please try again in a few moments';
+          }
+          
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
+                Icon(
+                  errorMessage.contains('Setting up') ? Icons.hourglass_empty : Icons.error_outline, 
+                  size: 64, 
+                  color: errorMessage.contains('Setting up') ? Colors.orange : Colors.red[300]
+                ),
                 const SizedBox(height: 16),
                 Text(
-                  'Error loading ride requests',
+                  errorMessage,
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
@@ -215,12 +352,17 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Please check your connection and try again',
+                  errorDetails,
                   style: TextStyle(
                     fontSize: 14,
                     color: Colors.grey[600],
                   ),
+                  textAlign: TextAlign.center,
                 ),
+                if (errorMessage.contains('Setting up')) ...[
+                  const SizedBox(height: 16),
+                  const CircularProgressIndicator(),
+                ],
               ],
             ),
           );
@@ -444,7 +586,7 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
                   const Spacer(),
                   if (_currentDriver?.userId != null)
                     ElevatedButton(
-                      onPressed: isLoading ? null : () => _onAcceptRidePressed(ride.id, ride.toMap(), _currentDriver!.userId),
+                      onPressed: isLoading ? null : () => _acceptRide(ride.id, ride.toMap()),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,

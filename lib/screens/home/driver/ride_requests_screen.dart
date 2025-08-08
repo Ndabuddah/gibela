@@ -207,7 +207,7 @@ class _RideRequestBody extends StatelessWidget {
                           return;
                         }
                         final rideService = RideService();
-                        final ride = await rideService.createRideRequest(
+                        final ride = await rideService.requestRide(
                           passengerId: user.uid,
                           pickupAddress: provider.pickupAddress!,
                           pickupLat: provider.pickupCoords![0],
@@ -226,22 +226,40 @@ class _RideRequestBody extends StatelessWidget {
                           return;
                         }
                         provider.setRequestStatus(RideRequestStatus.waiting);
-                        // Listen for ride acceptance
+                        // Listen for ride status updates
                         DatabaseService().listenToRideUpdates(ride.id).listen((updatedRide) {
-                          if (updatedRide.status == RideStatus.accepted) {
-                            provider.setRequestStatus(RideRequestStatus.accepted);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Ride request accepted!')),
-                            );
-                            provider.clear();
-                            provider.setRequestStatus(RideRequestStatus.idle);
-                          } else if (updatedRide.status == RideStatus.cancelled) {
-                            provider.setRequestStatus(RideRequestStatus.rejected);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Ride request was cancelled.')),
-                            );
-                            provider.clear();
-                            provider.setRequestStatus(RideRequestStatus.idle);
+                          switch (updatedRide.status) {
+                            case RideStatus.accepted:
+                              provider.setRequestStatus(RideRequestStatus.accepted);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Ride request accepted!')),
+                              );
+                              provider.clear();
+                              provider.setRequestStatus(RideRequestStatus.idle);
+                              break;
+                            case RideStatus.cancelled:
+                              provider.setRequestStatus(RideRequestStatus.rejected);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Ride request was cancelled.')),
+                              );
+                              provider.clear();
+                              provider.setRequestStatus(RideRequestStatus.idle);
+                              break;
+                            case RideStatus.completed:
+                              provider.setRequestStatus(RideRequestStatus.completed);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Ride completed!')),
+                              );
+                              provider.clear();
+                              provider.setRequestStatus(RideRequestStatus.idle);
+                              break;
+                            case RideStatus.driverArrived:
+                            case RideStatus.inProgress:
+                              // These are intermediate states, no need to clear the form
+                              break;
+                            default:
+                              // Handle other statuses if needed
+                              break;
                           }
                         });
                       } catch (e) {

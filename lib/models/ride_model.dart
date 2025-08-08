@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 enum RideStatus { requested, accepted, driverArrived, inProgress, completed, cancelled }
 
 class RideModel {
@@ -66,26 +68,114 @@ class RideModel {
   });
 
   factory RideModel.fromMap(Map<String, dynamic> data, String id) {
+    // Handle both old format (rides collection) and new format (requests collection)
+    
+    print('🔍 RideModel.fromMap called with data: $data');
+    
+    // Handle passengerId field (could be 'userId' in requests collection)
+    final passengerId = data['passengerId'] ?? data['userId'] ?? '';
+    
+    // Handle coordinates (could be arrays in requests collection)
+    double pickupLat = 0.0;
+    double pickupLng = 0.0;
+    double dropoffLat = 0.0;
+    double dropoffLng = 0.0;
+    
+    if (data['pickupCoordinates'] != null && data['pickupCoordinates'] is List) {
+      // New format: coordinates as arrays
+      final pickupCoords = data['pickupCoordinates'] as List;
+      print('🔍 Pickup coordinates array: $pickupCoords');
+      if (pickupCoords.length >= 2) {
+        pickupLat = (pickupCoords[0] ?? 0).toDouble();
+        pickupLng = (pickupCoords[1] ?? 0).toDouble();
+        print('🔍 Parsed pickup coordinates: $pickupLat, $pickupLng');
+      }
+    } else {
+      // Old format: separate lat/lng fields
+      pickupLat = (data['pickupLat'] ?? 0).toDouble();
+      pickupLng = (data['pickupLng'] ?? 0).toDouble();
+      print('🔍 Using old format pickup coordinates: $pickupLat, $pickupLng');
+    }
+    
+    if (data['dropoffCoordinates'] != null && data['dropoffCoordinates'] is List) {
+      // New format: coordinates as arrays
+      final dropoffCoords = data['dropoffCoordinates'] as List;
+      if (dropoffCoords.length >= 2) {
+        dropoffLat = (dropoffCoords[0] ?? 0).toDouble();
+        dropoffLng = (dropoffCoords[1] ?? 0).toDouble();
+      }
+    } else {
+      // Old format: separate lat/lng fields
+      dropoffLat = (data['dropoffLat'] ?? 0).toDouble();
+      dropoffLng = (data['dropoffLng'] ?? 0).toDouble();
+    }
+    
+    // Handle request time (could be 'createdAt' in requests collection)
+    DateTime requestTime;
+    if (data['requestTime'] != null) {
+      requestTime = DateTime.fromMillisecondsSinceEpoch(data['requestTime']);
+    } else if (data['createdAt'] != null) {
+      // Handle Firestore Timestamp
+      if (data['createdAt'] is Timestamp) {
+        requestTime = (data['createdAt'] as Timestamp).toDate();
+      } else {
+        requestTime = DateTime.now();
+      }
+    } else {
+      requestTime = DateTime.now();
+    }
+    
+    // Handle status (could be string in requests collection)
+    RideStatus status;
+    if (data['status'] is String) {
+      // New format: status as string
+      switch (data['status']) {
+        case 'pending':
+          status = RideStatus.requested;
+          break;
+        case 'accepted':
+          status = RideStatus.accepted;
+          break;
+        case 'driver_arrived':
+          status = RideStatus.driverArrived;
+          break;
+        case 'in_progress':
+          status = RideStatus.inProgress;
+          break;
+        case 'completed':
+          status = RideStatus.completed;
+          break;
+        case 'cancelled':
+          status = RideStatus.cancelled;
+          break;
+        default:
+          status = RideStatus.requested;
+      }
+    } else {
+      // Old format: status as integer
+      status = RideStatus.values[data['status'] ?? 0];
+    }
+    
     return RideModel(
       id: id,
-      passengerId: data['passengerId'] ?? '',
+      passengerId: passengerId,
       driverId: data['driverId'],
       pickupAddress: data['pickupAddress'] ?? '',
       dropoffAddress: data['dropoffAddress'] ?? '',
-      pickupLat: (data['pickupLat'] ?? 0).toDouble(),
-      pickupLng: (data['pickupLng'] ?? 0).toDouble(),
-      dropoffLat: (data['dropoffLat'] ?? 0).toDouble(),
-      dropoffLng: (data['dropoffLng'] ?? 0).toDouble(),
+      pickupLat: pickupLat,
+      pickupLng: pickupLng,
+      dropoffLat: dropoffLat,
+      dropoffLng: dropoffLng,
       pickupPlaceId: data['pickupPlaceId'],
       dropoffPlaceId: data['dropoffPlaceId'],
       vehicleType: data['vehicleType'] ?? 'small',
       distance: (data['distance'] ?? 0).toDouble(),
       estimatedFare: (data['estimatedFare'] ?? 0).toDouble(),
       actualFare: data['actualFare']?.toDouble(),
-      requestTime: (data['requestTime'] != null) ? DateTime.fromMillisecondsSinceEpoch(data['requestTime']) : DateTime.now(),
+      requestTime: requestTime,
       pickupTime: data['pickupTime'] != null ? DateTime.fromMillisecondsSinceEpoch(data['pickupTime']) : null,
       dropoffTime: data['dropoffTime'] != null ? DateTime.fromMillisecondsSinceEpoch(data['dropoffTime']) : null,
-      status: RideStatus.values[data['status'] ?? 0],
+      status: status,
       isPeak: data['isPeak'] ?? false,
       riskFactor: (data['riskFactor'] ?? 1.0).toDouble(),
       passengerRating: data['passengerRating'],

@@ -178,7 +178,8 @@ class _LocationPermissionScreenState extends State<LocationPermissionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Consider permissions granted if location service is enabled and location permission is granted
+    // For passengers, consider permissions granted if location service is enabled and basic location permission is granted
+    // Background location is optional for passengers
     final isAllGranted = _locationGranted && _locationServiceEnabled;
     print('Build Check:');
     print('Location Service Enabled: $_locationServiceEnabled');
@@ -199,56 +200,35 @@ class _LocationPermissionScreenState extends State<LocationPermissionScreen> {
           child: SafeArea(
             child: Column(
               children: [
-                Padding(
+                // Header
+                Container(
                   padding: const EdgeInsets.all(20),
                   child: Row(
                     children: [
-                      const Text(
-                        'Location Permissions',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
+                      IconButton(
+                        onPressed: () {
+                          // Allow users to skip if they want
+                          _navigateToHomeScreen();
+                        },
+                        icon: const Icon(Icons.close, color: Colors.white, size: 28),
                       ),
                       const Spacer(),
-                      TextButton(
-                        onPressed: isAllGranted ? _navigateToHomeScreen : null,
-                        style: TextButton.styleFrom(
-                          backgroundColor: isAllGranted 
-                            ? Colors.white.withOpacity(0.2)
-                            : Colors.white.withOpacity(0.05),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
+                      if (isAllGranted)
+                        TextButton(
+                          onPressed: _navigateToHomeScreen,
+                          child: const Text(
+                            'Continue',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              'Next',
-                              style: TextStyle(
-                                color: isAllGranted ? Colors.white : Colors.white.withOpacity(0.3),
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Icon(
-                              Icons.arrow_forward,
-                              color: isAllGranted ? Colors.white : Colors.white.withOpacity(0.3),
-                            ),
-                          ],
-                        ),
-                      ),
                     ],
                   ),
                 ),
-                // Main content
+                // Content
                 Expanded(
                   child: SingleChildScrollView(
                     child: Padding(
@@ -258,8 +238,8 @@ class _LocationPermissionScreenState extends State<LocationPermissionScreen> {
                         children: [
                           Text(
                             isAllGranted 
-                              ? 'All permissions granted! You can continue to the app.'
-                              : 'Please grant all permissions to continue',
+                              ? 'Great! You can now use the app with location features.'
+                              : 'Location permissions help us provide better service',
                             style: TextStyle(
                               fontSize: 14,
                               color: Colors.white.withOpacity(0.7),
@@ -290,7 +270,7 @@ class _LocationPermissionScreenState extends State<LocationPermissionScreen> {
                           const SizedBox(height: 16),
                           _buildPermissionCard(
                             icon: Icons.location_searching,
-                            title: 'Background Location',
+                            title: 'Background Location (Optional)',
                             description: widget.isDriver
                                 ? 'As per Google\'s requirements, background location access is essential for:\n\n'
                                   '• Receiving real-time ride requests even when app is minimized\n'
@@ -298,12 +278,12 @@ class _LocationPermissionScreenState extends State<LocationPermissionScreen> {
                                   '• Safety features and emergency assistance\n'
                                   '• Route optimization and navigation updates\n\n'
                                   'Without this permission, you won\'t receive ride requests when the app is in background.'
-                                : 'As per Google\'s requirements, background location access is essential for:\n\n'
+                                : 'Background location access is optional for passengers and helps with:\n\n'
                                   '• Continuous ride tracking even when app is minimized\n'
                                   '• Real-time driver location updates\n'
                                   '• Safety features and emergency assistance\n'
                                   '• Accurate pickup and dropoff coordination\n\n'
-                                  'Without this permission, ride tracking will stop when app is minimized.',
+                                  'You can still use the app without this permission.',
                             isGranted: _backgroundLocationGranted,
                             onTap: _backgroundLocationGranted ? null : _requestBackgroundLocationPermission,
                             showButton: !_backgroundLocationGranted && _locationGranted,
@@ -317,42 +297,54 @@ class _LocationPermissionScreenState extends State<LocationPermissionScreen> {
                     ),
                   ),
                 ),
+                // Bottom section with "Don't ask again" option
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      // Don't ask again option
+                      if (!isAllGranted)
+                        TextButton(
+                          onPressed: () async {
+                            await PermissionService.setDontAskAgain();
+                            _navigateToHomeScreen();
+                          },
+                          child: Text(
+                            'Don\'t ask again',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.6),
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 10),
+                      // Continue button (only show if basic permissions are granted)
+                      if (isAllGranted)
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: _navigateToHomeScreen,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text(
+                              'Continue to App',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ],
-            ),
-          ),
-        ),
-        // Bottom Continue button - always visible
-        bottomNavigationBar: Container(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 30),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.black.withOpacity(0),
-                Colors.black,
-              ],
-            ),
-          ),
-          child: ElevatedButton(
-            onPressed: isAllGranted ? _navigateToHomeScreen : null,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: isAllGranted ? Colors.white : Colors.white.withOpacity(0.1),
-              foregroundColor: Colors.black,
-              disabledForegroundColor: Colors.white.withOpacity(0.3),
-              disabledBackgroundColor: Colors.white.withOpacity(0.1),
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: Text(
-              'Continue to App',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: isAllGranted ? Colors.black : Colors.white.withOpacity(0.3),
-              ),
             ),
           ),
         ),

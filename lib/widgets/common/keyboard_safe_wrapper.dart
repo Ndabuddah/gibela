@@ -37,14 +37,7 @@ class KeyboardSafeWrapper extends StatelessWidget {
       child: SingleChildScrollView(
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         padding: padding ?? EdgeInsets.zero,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(
-            minHeight: double.infinity,
-          ),
-          child: IntrinsicHeight(
-            child: child,
-          ),
-        ),
+        child: child,
       ),
     );
   }

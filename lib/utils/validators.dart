@@ -95,15 +95,10 @@ class Validators {
 
   // Vehicle license plate validation
   static String? validateLicensePlate(String? value) {
-    if (value == null || value.isEmpty) {
+    // Very relaxed: only require something after trimming
+    if (value == null || value.trim().isEmpty) {
       return 'License plate is required';
     }
-
-    // Simple check for length
-    if (value.length < 5 || value.length > 10) {
-      return 'Please enter a valid license plate';
-    }
-
     return null;
   }
 

@@ -19,6 +19,20 @@ class RideNotificationService {
     }
   }
 
+  // Get complete passenger details from users collection
+  static Future<Map<String, dynamic>?> _getPassengerDetails(String passengerId) async {
+    try {
+      final passengerDoc = await _firestore.collection('users').doc(passengerId).get();
+      if (passengerDoc.exists) {
+        return passengerDoc.data();
+      }
+      return null;
+    } catch (e) {
+      print('Error fetching passenger details: $e');
+      return null;
+    }
+  }
+
   // Send notification when driver accepts a ride
   static Future<void> sendRideAcceptedNotification({
     required String rideId,
@@ -197,7 +211,7 @@ class RideNotificationService {
     }
   }
 
-  // Send notification when ride is cancelled
+  // Send notification when ride is cancelled (to passenger)
   static Future<void> sendRideCancelledNotification({
     required String rideId,
     required String passengerId,
@@ -223,6 +237,35 @@ class RideNotificationService {
       );
     } catch (e) {
       print('Error sending ride cancelled notification: $e');
+    }
+  }
+
+  // Send notification to driver when ride is cancelled
+  static Future<void> sendRideCancelledToDriverNotification({
+    required String rideId,
+    required String passengerId,
+    required String driverId,
+    String? passengerName,
+    required String reason,
+  }) async {
+    try {
+      // Fetch complete passenger details
+      final passengerDetails = await _getPassengerDetails(passengerId);
+      final passengerName = passengerDetails?['name'] ?? 'Unknown Passenger';
+
+      await _notificationService.sendRideNotification(
+        userId: driverId,
+        title: 'Ride Cancelled',
+        body: 'Ride with $passengerName has been cancelled. Reason: $reason',
+        rideId: rideId,
+        data: {
+          'passengerId': passengerId,
+          'passengerName': passengerName,
+          'reason': reason,
+        },
+      );
+    } catch (e) {
+      print('Error sending ride cancelled to driver notification: $e');
     }
   }
 

@@ -119,6 +119,12 @@ class PermissionService {
     await prefs.setBool(_dontAskAgainKey, true);
   }
 
+  // Check if user has chosen "don't ask again"
+  static Future<bool> hasUserChosenDontAskAgain() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_dontAskAgainKey) ?? false;
+  }
+
   // Reset "don't ask again" (useful for testing or user changes mind)
   static Future<void> resetDontAskAgain() async {
     final prefs = await SharedPreferences.getInstance();
@@ -160,12 +166,11 @@ class PermissionService {
   // Check if all required permissions are granted
   static Future<bool> areAllPermissionsGranted() async {
     final locationGranted = await isLocationPermissionGranted();
-    final backgroundLocationGranted = await isBackgroundLocationPermissionGranted();
     final locationServiceEnabled = await isLocationServiceEnabled();
 
-    // For both drivers and passengers, we need location services and basic location permission
-    // Background location is required for both to track rides in background
-    return locationGranted && backgroundLocationGranted && locationServiceEnabled;
+    // For passengers, we only need basic location permission and location services
+    // Background location is optional for passengers
+    return locationGranted && locationServiceEnabled;
   }
 
   // Check if we should show permission screen (considers "don't ask again")
@@ -179,6 +184,23 @@ class PermissionService {
     final dontAskAgain = prefs.getBool(_dontAskAgainKey) ?? false;
     
     // Only show if not all granted and user hasn't chosen "don't ask again"
+    return !dontAskAgain;
+  }
+
+  // Check if we should show permission screen for passengers (more lenient)
+  static Future<bool> shouldShowPermissionScreenForPassenger() async {
+    // Check if basic location permission is granted
+    final locationGranted = await isLocationPermissionGranted();
+    final locationServiceEnabled = await isLocationServiceEnabled();
+    
+    // If basic requirements are met, don't show
+    if (locationGranted && locationServiceEnabled) return false;
+    
+    // Check if user has chosen "don't ask again"
+    final prefs = await SharedPreferences.getInstance();
+    final dontAskAgain = prefs.getBool(_dontAskAgainKey) ?? false;
+    
+    // Only show if basic requirements not met and user hasn't chosen "don't ask again"
     return !dontAskAgain;
   }
 } 

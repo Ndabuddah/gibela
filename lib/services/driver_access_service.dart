@@ -1,16 +1,21 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../models/user_model.dart';
 
 class DriverAccessService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   // Check if driver has completed signup and payment
   Future<Map<String, dynamic>> checkDriverAccess(String userId) async {
     try {
+      print('🔍 Checking driver access for user: $userId');
+      
       final userDoc = await _firestore.collection('users').doc(userId).get();
       final driverDoc = await _firestore.collection('drivers').doc(userId).get();
       
       if (!userDoc.exists) {
+        print('❌ User document not found: $userId');
         return {
           'canAccess': false,
           'reason': 'User not found',
@@ -22,6 +27,7 @@ class DriverAccessService {
       
       // Check if user is registered as a driver
       if (!userData['isDriver']) {
+        print('❌ User is not registered as driver: $userId');
         return {
           'canAccess': false,
           'reason': 'Not registered as a driver',
@@ -29,20 +35,14 @@ class DriverAccessService {
         };
       }
 
-      // Check if email is verified
-      if (userData['emailVerified'] != true) {
-        return {
-          'canAccess': false,
-          'reason': 'Email not verified',
-          'status': 'email_verification_required',
-        };
-      }
+      print('✅ User is registered as driver');
 
       // Check if driver has chosen pay-later first
       bool isPayLater = false;
       if (driverDoc.exists) {
         final driverData = driverDoc.data() as Map<String, dynamic>;
         isPayLater = driverData['payLater'] ?? false;
+        print('💰 Driver pay-later status: $isPayLater');
       }
       
       // Only check payment if driver is not using pay-later
@@ -56,60 +56,66 @@ class DriverAccessService {
             .get();
 
         if (paymentsQuery.docs.isEmpty) {
+          print('❌ No successful payment found for driver: $userId');
           return {
             'canAccess': false,
             'reason': 'Payment required',
             'status': 'payment_required',
           };
         }
+        
+        print('✅ Payment verified for driver: $userId');
       }
 
       // Check if driver signup is required
-      if (userData['requiresDriverSignup'] == true || 
-          !driverDoc.exists || 
-          userData['driverProfileCompleted'] != true) {
+      if (userData['requiresDriverSignup'] == true || !driverDoc.exists) {
         print('🚫 Driver signup check failed:');
         print('- Requires Signup: ${userData['requiresDriverSignup']}');
         print('- Profile Exists: ${driverDoc.exists}');
-        print('- Profile Completed: ${userData['driverProfileCompleted']}');
         
         return {
           'canAccess': false,
-          'reason': 'Driver signup or profile incomplete',
+          'reason': 'Driver signup required',
           'status': 'signup_required',
           'missingItems': _getMissingItems(driverDoc.data() as Map<String, dynamic>?),
         };
       }
 
-      // Check if driver profile is complete
-      if (driverDoc.exists && !_isDriverProfileComplete(driverDoc.data() as Map<String, dynamic>)) {
-        print('🚫 Driver profile incomplete:');
-        final missingItems = _getMissingItems(driverDoc.data() as Map<String, dynamic>);
-        print('Missing items: $missingItems');
+      // Check if driver profile is complete (but don't block access if approved)
+      final isApproved = userData['isApproved'] ?? false;
+      final isProfileComplete = userData['driverProfileCompleted'] == true;
+      
+      print('📋 Driver profile status:');
+      print('- Is Approved: $isApproved');
+      print('- Profile Complete: $isProfileComplete');
+      
+      if (!isProfileComplete && !isApproved) {
+        print('🚫 Driver profile incomplete and not approved');
         
         return {
           'canAccess': false,
           'reason': 'Driver profile incomplete',
           'status': 'signup_required',
-          'missingItems': missingItems,
+          'missingItems': _getMissingItems(driverDoc.data() as Map<String, dynamic>?),
         };
       }
 
-      // Check if the driver is approved
-      final isApproved = userData['isApproved'] ?? false;
-      
       // Driver can access but show appropriate status
-      return {
+      final result = {
         'canAccess': true,
         'isApproved': isApproved,
         'status': isApproved ? 'approved' : 'awaiting_approval',
         'reason': isApproved ? 'Fully approved' : 'Awaiting approval',
       };
+      
+      print('✅ Driver access granted: ${result['status']}');
+      return result;
+      
     } catch (e) {
-      print('Error checking driver access: $e');
+      print('❌ Error checking driver access: $e');
       return {
         'canAccess': false,
-        'reason': 'Error checking access',
+        'reason': 'Error checking access: $e',
         'status': 'error',
       };
     }
@@ -174,13 +180,42 @@ class DriverAccessService {
 
   // Helper method to check if driver profile is complete
   bool _isDriverProfileComplete(Map<String, dynamic> driverData) {
-    return driverData['idNumber']?.isNotEmpty == true &&
-           driverData['documents']?.isNotEmpty == true &&
-           driverData['vehicleType'] != null &&
-           driverData['vehicleModel'] != null &&
-           driverData['vehicleColor'] != null &&
-           driverData['licensePlate'] != null &&
-           driverData['towns']?.isNotEmpty == true;
+    // Check personal information
+    if (driverData['name']?.isEmpty ?? true) return false;
+    if (driverData['phoneNumber']?.isEmpty ?? true) return false;
+    if (driverData['idNumber']?.isEmpty ?? true) return false;
+    
+    // Check vehicle information
+    if (driverData['vehicleType']?.isEmpty ?? true) return false;
+    if (driverData['vehicleModel']?.isEmpty ?? true) return false;
+    if (driverData['vehicleColor']?.isEmpty ?? true) return false;
+    if (driverData['licensePlate']?.isEmpty ?? true) return false;
+    
+    // Check location information
+    if (driverData['towns']?.isEmpty ?? true) return false;
+    
+    // Check documents
+    if (driverData['documents']?.isEmpty ?? true) return false;
+    
+    // Check for specific required documents
+    final documents = driverData['documents'] as Map<String, dynamic>? ?? {};
+    final requiredDocs = [
+      'ID Document',
+      'Professional Driving Permit',
+      'Roadworthy Certificate',
+      'Vehicle Image',
+      'Driver Profile Image',
+      'Driver Image Next to Vehicle',
+      'Bank Statement'
+    ];
+    
+    for (final doc in requiredDocs) {
+      if (!documents.containsKey(doc) || documents[doc]?.isEmpty == true) {
+        return false;
+      }
+    }
+    
+    return true;
   }
 
   // Helper method to get list of missing items
@@ -189,26 +224,59 @@ class DriverAccessService {
     
     final missingItems = <String>[];
     
+    // Check personal information
+    if (driverData['name']?.isEmpty ?? true) {
+      missingItems.add('Full Name');
+    }
+    if (driverData['phoneNumber']?.isEmpty ?? true) {
+      missingItems.add('Phone Number');
+    }
     if (driverData['idNumber']?.isEmpty ?? true) {
       missingItems.add('ID Number');
     }
-    if (driverData['documents']?.isEmpty ?? true) {
-      missingItems.add('Required Documents');
-    }
-    if (driverData['vehicleType'] == null) {
+    
+    // Check vehicle information
+    if (driverData['vehicleType']?.isEmpty ?? true) {
       missingItems.add('Vehicle Type');
     }
-    if (driverData['vehicleModel'] == null) {
+    if (driverData['vehicleModel']?.isEmpty ?? true) {
       missingItems.add('Vehicle Model');
     }
-    if (driverData['vehicleColor'] == null) {
+    if (driverData['vehicleColor']?.isEmpty ?? true) {
       missingItems.add('Vehicle Color');
     }
-    if (driverData['licensePlate'] == null) {
+    if (driverData['licensePlate']?.isEmpty ?? true) {
       missingItems.add('License Plate');
     }
+    
+    // Check location information
     if (driverData['towns']?.isEmpty ?? true) {
       missingItems.add('Service Areas');
+    }
+    
+    // Check documents
+    if (driverData['documents']?.isEmpty ?? true) {
+      missingItems.add('Required Documents');
+    } else {
+      // Check for specific required documents
+      final documents = driverData['documents'] as Map<String, dynamic>? ?? {};
+      final requiredDocs = [
+        'ID Document',
+        'Professional Driving Permit',
+        'Roadworthy Certificate',
+        'Vehicle Image',
+        'Driver Profile Image',
+        'Driver Image Next to Vehicle',
+        'Bank Statement'
+      ];
+      
+      final missingDocs = requiredDocs.where((doc) => 
+        !documents.containsKey(doc) || documents[doc]?.isEmpty == true
+      ).toList();
+      
+      if (missingDocs.isNotEmpty) {
+        missingItems.add('Required Documents');
+      }
     }
     
     return missingItems;

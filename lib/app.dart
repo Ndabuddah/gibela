@@ -1,15 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'constants/app_colors.dart';
 import 'providers/theme_provider.dart';
-import 'services/auth_service.dart';
-import 'services/database_service.dart';
-import 'services/location_service.dart';
-import 'services/ride_service.dart';
-import 'services/storage_service.dart';
-import 'services/notification_service.dart';
 import 'screens/splash/splash_screen.dart';
+import 'services/notification_service.dart';
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -31,11 +25,9 @@ class MyApp extends StatelessWidget {
               final notificationService = Provider.of<NotificationService>(context, listen: false);
               notificationService.initialize(context);
             });
-            
+
             return MediaQuery(
-              data: MediaQuery.of(context).copyWith(
-                textScaler: const TextScaler.linear(1.0),
-              ),
+              data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.0)),
               child: child!,
             );
           },

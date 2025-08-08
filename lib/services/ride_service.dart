@@ -36,8 +36,8 @@ class RideService extends ChangeNotifier {
     super.dispose();
   }
 
-  // Create a new ride request
-  Future<RideModel?> createRideRequest({
+  // Request a ride (passenger)
+  Future<RideModel?> requestRide({
     required String passengerId,
     required String pickupAddress,
     required double pickupLat,
@@ -46,10 +46,21 @@ class RideService extends ChangeNotifier {
     required double dropoffLat,
     required double dropoffLng,
     required String vehicleType,
-    double distance = 1.0, // Default 1km for fare calculation
+    double distance = 0,
+    int passengerCount = 1,
+    bool isAsambeGirl = false,
+    bool isAsambeStudent = false,
+    bool isAsambeLuxury = false,
   }) async {
     _setLoading(true);
     try {
+      // Check if passenger already has an active request
+      final hasActive = await _databaseService.hasActiveRequest(passengerId);
+      if (hasActive) {
+        _setLoading(false);
+        throw Exception('You already have an active ride request. Please cancel it first or wait for a driver to accept it.');
+      }
+
       // Calculate distance if not provided
       if (distance <= 0) {
         distance = _calculateDistance(pickupLat, pickupLng, dropoffLat, dropoffLng);
@@ -79,6 +90,10 @@ class RideService extends ChangeNotifier {
         status: RideStatus.requested,
         isPeak: PricingService.isPeakHour(),
         riskFactor: 1.0, // Default risk factor
+        passengerCount: passengerCount,
+        isAsambeGirl: isAsambeGirl,
+        isAsambeStudent: isAsambeStudent,
+        isAsambeLuxury: isAsambeLuxury,
       );
 
       // Save to database
@@ -120,6 +135,18 @@ class RideService extends ChangeNotifier {
 
   // Accept a ride request (driver)
   Future<void> acceptRideRequest(String rideId, String driverId) async {
+    // Validate input parameters
+    if (rideId.isEmpty) {
+      print('❌ Ride acceptance failed: Empty ride ID detected');
+      throw Exception('Ride ID cannot be empty');
+    }
+    if (driverId.isEmpty) {
+      print('❌ Ride acceptance failed: Empty driver ID detected');
+      throw Exception('Driver ID cannot be empty');
+    }
+    
+    print('✅ Accepting ride request: $rideId by driver: $driverId');
+    
     _setLoading(true);
     try {
       // Get the ride
@@ -129,6 +156,34 @@ class RideService extends ChangeNotifier {
         throw Exception('Ride not found');
       }
 
+      // Check if ride is still available
+      if (ride.status != RideStatus.requested) {
+        _setLoading(false);
+        throw Exception('Ride is no longer available for acceptance');
+      }
+
+      // Check if driver is already assigned
+      if (ride.driverId != null) {
+        _setLoading(false);
+        throw Exception('Ride has already been accepted by another driver');
+      }
+
+      // Validate passenger ID
+      if (ride.passengerId.isEmpty) {
+        print('❌ Ride acceptance failed: Empty passenger ID in ride data');
+        _setLoading(false);
+        throw Exception('Passenger ID is missing from ride data');
+      }
+
+      print('✅ Ride found with passenger: ${ride.passengerId}');
+
+      // Check if driver is available (not on another ride)
+      final driverActiveRide = await _databaseService.getActiveRideForDriver(driverId);
+      if (driverActiveRide != null) {
+        _setLoading(false);
+        throw Exception('You are already on an active ride. Please complete it first.');
+      }
+
       // Update the ride
       final updatedRide = ride.copyWith(
         driverId: driverId,
@@ -136,12 +191,15 @@ class RideService extends ChangeNotifier {
       );
 
       await _databaseService.updateRide(updatedRide);
+      print('✅ Ride updated successfully');
 
       // Create chat between driver and passenger
       await _databaseService.createOrGetChat(driverId, ride.passengerId);
+      print('✅ Chat created successfully');
 
       // Update driver status
       await _databaseService.updateDriverStatus(driverId, DriverStatus.onRide);
+      print('✅ Driver status updated');
 
       // Send notification to passenger
       await RideNotificationService.sendRideAcceptedNotification(
@@ -150,9 +208,11 @@ class RideService extends ChangeNotifier {
         driverId: driverId,
         vehicleType: ride.vehicleType,
       );
+      print('✅ Notification sent to passenger');
 
       _setLoading(false);
     } catch (e) {
+      print('❌ Error in acceptRideRequest: $e');
       _setLoading(false);
       rethrow;
     }
@@ -242,9 +302,18 @@ class RideService extends ChangeNotifier {
         _setLoading(false);
         throw Exception('No driver assigned to this ride');
       }
+      
+      // Check if ride is in progress
+      if (ride.status != RideStatus.inProgress) {
+        _setLoading(false);
+        throw Exception('Ride is not in progress. Current status: ${ride.status}');
+      }
 
       // Use the new completion method that tracks earnings
       await _databaseService.completeRide(rideId, ride.driverId!, actualFare);
+      
+      // Update driver status to available
+      await _databaseService.updateDriverStatus(ride.driverId!, DriverStatus.online);
 
       // Send completion notification to passenger with rich driver details
       await RideNotificationService.sendRideCompletedNotification(
@@ -253,9 +322,12 @@ class RideService extends ChangeNotifier {
         driverId: ride.driverId!,
         fare: actualFare,
       );
+      
+      print('✅ Ride completed successfully: $rideId, Fare: R${actualFare.toStringAsFixed(2)}');
 
       _setLoading(false);
     } catch (e) {
+      print('❌ Error completing ride: $e');
       _setLoading(false);
       rethrow;
     }
@@ -284,6 +356,29 @@ class RideService extends ChangeNotifier {
         reason: reason,
         isDriverCancellation: isDriver,
       );
+
+      // Send appropriate notifications
+      final cancellationReason = reason ?? 'No reason provided';
+      
+      if (isDriver) {
+        // Driver cancelled - notify passenger
+        await RideNotificationService.sendRideCancelledNotification(
+          rideId: rideId,
+          passengerId: ride.passengerId,
+          driverId: ride.driverId!,
+          reason: cancellationReason,
+        );
+      } else {
+        // Passenger cancelled - notify driver
+        if (ride.driverId != null) {
+          await RideNotificationService.sendRideCancelledToDriverNotification(
+            rideId: rideId,
+            passengerId: ride.passengerId,
+            driverId: ride.driverId!,
+            reason: cancellationReason,
+          );
+        }
+      }
 
       _setLoading(false);
     } catch (e) {

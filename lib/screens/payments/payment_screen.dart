@@ -69,9 +69,13 @@ class _PaymentScreenState extends State<PaymentScreen> with TickerProviderStateM
     });
 
     try {
+      print('💳 Starting payment process for amount: R${widget.amount}');
+      
       await PaystackFlutter().pay(
         context: context,
-        secretKey: 'sk_live_50be0cff4e564295a8723aa3c8432d805895e248', // Using the same key as ride request payment
+        // TODO: Inject Paystack secret key via secure runtime config (e.g., dart-define or remote config)
+        // DO NOT commit secrets to source control
+        secretKey: const String.fromEnvironment('PAYSTACK_SECRET_KEY', defaultValue: ''),
         amount: (widget.amount * 100).toDouble(),
         email: widget.email,
         callbackUrl: 'https://callback.com',
@@ -80,6 +84,8 @@ class _PaymentScreenState extends State<PaymentScreen> with TickerProviderStateM
         currency: Currency.ZAR,
         onSuccess: (callback) async {
           try {
+            print('✅ Payment successful, reference: ${callback.reference}');
+            
             // Record payment in database
             await _recordPayment(callback.reference);
             
@@ -91,9 +97,11 @@ class _PaymentScreenState extends State<PaymentScreen> with TickerProviderStateM
             if (user != null) {
               final verified = await DatabaseService().verifyDriverPayment(user.uid);
               if (verified) {
+                print('✅ Payment verification successful');
                 // Call success callback only after verification
                 widget.onPaymentSuccess();
               } else {
+                print('❌ Payment verification failed');
                 // Payment verification failed
                 setState(() {
                   _error = 'Payment verification failed. Please contact support.';
@@ -101,19 +109,22 @@ class _PaymentScreenState extends State<PaymentScreen> with TickerProviderStateM
                 });
               }
             } else {
+              print('❌ No authenticated user found');
               setState(() {
-                _error = 'User session expired. Please try again.';
+                _error = 'User authentication error. Please try again.';
                 _isLoading = false;
               });
             }
           } catch (e) {
+            print('❌ Error in payment success callback: $e');
             setState(() {
-              _error = 'Payment verification error: ${e.toString()}';
+              _error = 'Payment processing error: $e';
               _isLoading = false;
             });
           }
         },
         onCancelled: (callback) {
+          print('❌ Payment cancelled by user');
           setState(() {
             _error = 'Payment was cancelled. Please try again.';
             _isLoading = false;
@@ -121,6 +132,7 @@ class _PaymentScreenState extends State<PaymentScreen> with TickerProviderStateM
         },
       );
     } catch (e) {
+      print('❌ Error initiating payment: $e');
       setState(() {
         _error = 'An error occurred during payment. Please try again.';
         _isLoading = false;

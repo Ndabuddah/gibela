@@ -170,4 +170,5 @@ enum RideRequestStatus {
   waiting,
   accepted,
   rejected,
+  completed,
 }

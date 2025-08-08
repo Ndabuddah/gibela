@@ -5,12 +5,14 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../constants/app_colors.dart';
 import '../../services/auth_service.dart';
+import '../../services/permission_service.dart';
 import '../../widgets/common/modern_alert_dialog.dart';
 import '../auth/login_screen.dart';
 import 'terms_screen.dart';
 import 'delete_account_screen.dart';
 import 'admin_dashboard_screen.dart';
 import 'panic_settings_screen.dart';
+import 'permission_settings_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -133,6 +135,19 @@ class SettingsScreen extends StatelessWidget {
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const TermsScreen()),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: ListTile(
+              leading: const Icon(Icons.location_on, color: AppColors.primary),
+              title: const Text('Location Permissions'),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const PermissionSettingsScreen()),
                 );
               },
             ),

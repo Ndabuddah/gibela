@@ -9,6 +9,7 @@ import '../../providers/theme_provider.dart';
 import '../../services/auth_service.dart';
 import '../../services/database_service.dart';
 import '../../services/driver_access_service.dart';
+import '../../services/network_service.dart';
 import '../../widgets/common/modern_alert_dialog.dart';
 import '../home/driver/driver_home_screen.dart';
 import '../home/passenger/passenger_home_screen.dart';
@@ -72,37 +73,62 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
 
+    // Check network connectivity first
+    print('🌐 LoginScreen: Checking network connectivity...');
+    await NetworkService.logNetworkStatus();
+    
+    final hasNetwork = await NetworkService.checkNetworkBeforeOperation(context);
+    if (!hasNetwork) {
+      print('❌ LoginScreen: No network connection available');
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
+      print('🚀 LoginScreen: Starting login process...');
+      print('📧 Email: ${_emailController.text.trim()}');
+      print('🔑 Password length: ${_passwordController.text.length}');
+      
       final authService = Provider.of<AuthService>(context, listen: false);
+      print('🔐 LoginScreen: AuthService obtained, attempting sign in...');
+      
       final userCredential = await authService.signInWithEmailAndPassword(_emailController.text.trim(), _passwordController.text);
+      print('✅ LoginScreen: Firebase Auth successful, userCredential: ${userCredential != null}');
+      
       // Fetch UserModel from DB
       UserModel? userModel;
       if (userCredential != null) {
+        print('👤 LoginScreen: Fetching user model from database...');
         userModel = await DatabaseService().getUserById(userCredential.user?.uid ?? '');
+        print('👤 LoginScreen: User model fetched: ${userModel != null}');
       }
 
       if (!mounted) return;
 
       final firebaseUser = userCredential?.user;
       if (firebaseUser == null) {
+        print('❌ LoginScreen: Firebase user is null');
         _showErrorDialog('Login Failed', 'No user found. Please try again.');
         return;
       }
 
+      print('🔄 LoginScreen: Reloading user to get latest email verification status...');
       await firebaseUser.reload(); // Ensure latest emailVerified
       final refreshedUser = authService.currentUser ?? firebaseUser;
+      print('📧 LoginScreen: Email verified: ${refreshedUser.emailVerified}');
 
       if (userModel == null) {
+        print('❌ LoginScreen: User model is null - account data not found');
         _showErrorDialog('Account Not Found', 'Account data not found. Please complete registration.');
         return;
       }
 
       if (!refreshedUser.emailVerified) {
+        print('📧 LoginScreen: Email not verified, navigating to verification screen');
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
-            builder: (_) => EmailVerificationScreen(user: refreshedUser, isDriver: userModel?.role == 'driver'),
+            builder: (_) => EmailVerificationScreen(user: refreshedUser, isDriver: userModel?.isDriver ?? false),
           ),
         );
         return;
@@ -164,7 +190,8 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
             transitionDuration: const Duration(milliseconds: 500),
           ),
         );
-      } else if (userModel.role == 'passenger') {
+      } else if (!userModel.isDriver) {
+        print('👤 LoginScreen: User is passenger, navigating to passenger home');
         Navigator.of(context).pushReplacement(
           PageRouteBuilder(
             pageBuilder: (context, animation, secondaryAnimation) => PassengerHomeScreen(),
@@ -178,6 +205,8 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
         _showErrorDialog('Unknown Role', 'Unknown user role. Please contact support.');
       }
     } catch (e) {
+      print('❌ LoginScreen: Error during login: $e');
+      print('❌ LoginScreen: Error type: ${e.runtimeType}');
       if (!mounted) return;
       _handleAuthError(e);
     } finally {

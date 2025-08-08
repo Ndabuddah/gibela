@@ -1,6 +1,8 @@
+import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../models/chat_model.dart';
 import '../models/driver_model.dart';
@@ -16,6 +18,12 @@ class DatabaseService extends ChangeNotifier {
   Future<String> getOrCreateChat(String userId) async {
     final currentUserId = FirebaseAuth.instance.currentUser?.uid;
     if (currentUserId == null) throw Exception('Not logged in');
+    
+    // Validate input parameters
+    if (userId.isEmpty) {
+      throw Exception('User ID cannot be empty');
+    }
+    
     final chatQuery = await _firestore.collection('chats').where('participants', arrayContains: currentUserId).get();
     for (final doc in chatQuery.docs) {
       final participants = List<String>.from(doc['participants'] ?? []);
@@ -39,12 +47,28 @@ class DatabaseService extends ChangeNotifier {
     final chatDoc = await chatRef.get();
     if (!chatDoc.exists) throw Exception('Chat does not exist');
     final participants = List<String>.from(chatDoc['participants'] ?? []);
+    
+    // Validate participants
+    if (participants.isEmpty) {
+      throw Exception('Chat has no participants');
+    }
+    
     final unreadMap = Map<String, dynamic>.from(chatDoc['unread'] ?? {});
+    
+    // Ensure all participants have unread counts initialized
     for (final uid in participants) {
-      if (uid != senderId) {
+      if (uid.isNotEmpty && !unreadMap.containsKey(uid)) {
+        unreadMap[uid] = 0;
+      }
+    }
+    
+    // Update unread counts for non-sender participants
+    for (final uid in participants) {
+      if (uid.isNotEmpty && uid != senderId) {
         unreadMap[uid] = (unreadMap[uid] ?? 0) + 1;
       }
     }
+    
     await chatRef.collection('messages').add({
       'senderId': senderId,
       'text': text,
@@ -61,6 +85,16 @@ class DatabaseService extends ChangeNotifier {
 
   // Create or get chat between driver and passenger
   Future<String> createOrGetChat(String driverId, String passengerId) async {
+    // Validate input parameters
+    if (driverId.isEmpty || passengerId.isEmpty) {
+      print('❌ Chat creation failed: Empty user IDs detected');
+      print('   Driver ID: "$driverId" (length: ${driverId.length})');
+      print('   Passenger ID: "$passengerId" (length: ${passengerId.length})');
+      throw Exception('Driver ID and Passenger ID cannot be empty');
+    }
+    
+    print('✅ Creating chat between driver: $driverId and passenger: $passengerId');
+    
     // Sort IDs to ensure consistent chat ID
     final participants = [driverId, passengerId]..sort();
     final chatId = participants.join('_');
@@ -69,6 +103,7 @@ class DatabaseService extends ChangeNotifier {
     final chatDoc = await _firestore.collection('chats').doc(chatId).get();
     
     if (!chatDoc.exists) {
+      print('📝 Creating new chat document with ID: $chatId');
       // Create new chat
       await _firestore.collection('chats').doc(chatId).set({
         'participants': participants,
@@ -81,6 +116,9 @@ class DatabaseService extends ChangeNotifier {
           passengerId: 0,
         },
       });
+      print('✅ Chat document created successfully');
+    } else {
+      print('📝 Chat document already exists with ID: $chatId');
     }
     
     return chatId;
@@ -123,6 +161,8 @@ class DatabaseService extends ChangeNotifier {
   CollectionReference get _usersCollection => _firestore.collection('users');
   CollectionReference get _driversCollection => _firestore.collection('drivers');
   CollectionReference get _ridesCollection => _firestore.collection('rides');
+  CollectionReference get _requestsCollection => _firestore.collection('requests');
+  CollectionReference get _scheduledRequestsCollection => _firestore.collection('scheduled_bookings');
   CollectionReference get _notificationsCollection => _firestore.collection('notifications');
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -286,16 +326,48 @@ class DatabaseService extends ChangeNotifier {
       // Create or update the driver profile document
       await _driversCollection.doc(driver.userId).set(driver.toMap());
 
-      // Calculate missing fields
+      // Calculate missing fields more accurately
       final missingFields = <String>[];
+      
+      // Check personal information
       if (driver.name.isEmpty) missingFields.add('Full Name');
       if (driver.phoneNumber.isEmpty) missingFields.add('Phone Number');
       if (driver.idNumber.isEmpty) missingFields.add('ID Number');
+      
+      // Check vehicle information
       if (driver.vehicleModel == null || driver.vehicleModel!.isEmpty) missingFields.add('Vehicle Model');
       if (driver.licensePlate == null || driver.licensePlate!.isEmpty) missingFields.add('License Plate');
-      if (driver.documents.isEmpty) missingFields.add('Required Documents');
+      if (driver.vehicleType == null || driver.vehicleType!.isEmpty) missingFields.add('Vehicle Type');
+      if (driver.vehicleColor == null || driver.vehicleColor!.isEmpty) missingFields.add('Vehicle Color');
+      
+      // Check location information
+      if (driver.towns.isEmpty) missingFields.add('Service Areas');
+      
+      // Check documents
+      if (driver.documents.isEmpty) {
+        missingFields.add('Required Documents');
+      } else {
+        // Check for specific required documents
+        final requiredDocs = [
+          'ID Document',
+          'Professional Driving Permit',
+          'Roadworthy Certificate',
+          'Vehicle Image',
+          'Driver Profile Image',
+          'Driver Image Next to Vehicle',
+          'Bank Statement'
+        ];
+        
+        final missingDocs = requiredDocs.where((doc) => !driver.documents.containsKey(doc)).toList();
+        if (missingDocs.isNotEmpty) {
+          missingFields.add('Required Documents');
+        }
+      }
 
       print('📝 Updating user document with completed driver profile');
+      
+      // Get profile image URL from documents
+      String? profileImageUrl = driver.documents['Driver Profile Image'];
       
       // Update user document with comprehensive driver information
       final userUpdates = {
@@ -307,7 +379,7 @@ class DatabaseService extends ChangeNotifier {
         'isDriver': true,
         'isApproved': false, // Always false until manually approved
         'requiresDriverSignup': false, // Mark driver signup as completed
-        'driverProfileCompleted': true,
+        'driverProfileCompleted': missingFields.isEmpty, // Only true if no missing fields
         'driverSignupDate': FieldValue.serverTimestamp(),
         'approvalStatus': 'awaiting_approval', // Update status to awaiting approval
         'savedAddresses': [],
@@ -316,7 +388,7 @@ class DatabaseService extends ChangeNotifier {
         'IsFemale': driver.isFemale ?? false,
         'IsForStudents': driver.isForStudents ?? false,
         'missingProfileFields': missingFields,
-        'profileImage': driver.profileImage,
+        'profileImage': profileImageUrl, // Save profile image URL
         'lastUpdated': FieldValue.serverTimestamp(),
         // Add payment-related flags
         'payLater': driver.payLater,
@@ -333,6 +405,7 @@ class DatabaseService extends ChangeNotifier {
       print('- Pay Later: ${driver.payLater}');
       print('- Documents: ${driver.documents.length}');
       print('- Missing Fields: ${missingFields.length}');
+      print('- Profile Image: ${profileImageUrl != null ? 'Set' : 'Not set'}');
       
     } catch (e) {
       print('❌ Error creating driver profile: $e');
@@ -408,22 +481,375 @@ class DatabaseService extends ChangeNotifier {
 
   // ========== RIDE METHODS ==========
 
+  // Check if passenger has an active request
+  Future<bool> hasActiveRequest(String passengerId) async {
+    try {
+      final QuerySnapshot snapshot = await _requestsCollection
+          .where('userId', isEqualTo: passengerId)
+          .where('status', isEqualTo: 'pending')
+          .get();
+      
+      return snapshot.docs.isNotEmpty;
+    } catch (e) {
+      print('Error checking active request: $e');
+      return false;
+    }
+  }
+
+  // Cancel all pending requests for a passenger
+  Future<void> cancelAllPendingRequests(String passengerId, {String? reason}) async {
+    try {
+      final QuerySnapshot snapshot = await _requestsCollection
+          .where('userId', isEqualTo: passengerId)
+          .where('status', isEqualTo: 'pending')
+          .get();
+      
+      final batch = _firestore.batch();
+      for (final doc in snapshot.docs) {
+        batch.update(doc.reference, {
+          'status': 'cancelled',
+          'cancelledAt': FieldValue.serverTimestamp(),
+          'cancellationReason': reason ?? 'Passenger cancelled',
+        });
+      }
+      
+      await batch.commit();
+      print('✅ Cancelled ${snapshot.docs.length} pending requests for passenger: $passengerId');
+    } catch (e) {
+      print('Error cancelling pending requests: $e');
+      rethrow;
+    }
+  }
+
+  // Clean up abandoned requests (requests older than 30 minutes)
+  Future<void> cleanupAbandonedRequests() async {
+    try {
+      final thirtyMinutesAgo = DateTime.now().subtract(const Duration(minutes: 30));
+      
+      final QuerySnapshot snapshot = await _requestsCollection
+          .where('status', isEqualTo: 'pending')
+          .where('createdAt', isLessThan: Timestamp.fromDate(thirtyMinutesAgo))
+          .get();
+      
+      if (snapshot.docs.isNotEmpty) {
+        final batch = _firestore.batch();
+        for (final doc in snapshot.docs) {
+          batch.update(doc.reference, {
+            'status': 'cancelled',
+            'cancelledAt': FieldValue.serverTimestamp(),
+            'cancellationReason': 'Request abandoned (timeout)',
+          });
+        }
+        
+        await batch.commit();
+        print('✅ Cleaned up ${snapshot.docs.length} abandoned requests');
+      }
+    } catch (e) {
+      print('Error cleaning up abandoned requests: $e');
+    }
+  }
+
   // Create a new ride request
   Future<String> createRideRequest(RideModel ride) async {
     try {
-      final DocumentReference docRef = await _ridesCollection.add(ride.toMap());
+      // Convert RideModel to requests collection format
+      final Map<String, dynamic> requestData = {
+        'userId': ride.passengerId, // Use userId instead of passengerId
+        'pickupAddress': ride.pickupAddress,
+        'pickupCoordinates': [ride.pickupLat, ride.pickupLng], // Use coordinates array
+        'dropoffAddress': ride.dropoffAddress,
+        'dropoffCoordinates': [ride.dropoffLat, ride.dropoffLng], // Use coordinates array
+        'vehicleType': ride.vehicleType,
+        'distance': ride.distance,
+        'estimatedFare': ride.estimatedFare,
+        'basePrice': ride.estimatedFare, // Add basePrice field
+        'isPeak': ride.isPeak,
+        'isNight': false, // Add isNight field
+        'vehiclePrice': ride.vehiclePrice?.toString(),
+        'paymentType': 'Cash', // Default payment type
+        'paymentStatus': 'pending', // Default payment status
+        'status': 'pending', // Use string status
+        'createdAt': FieldValue.serverTimestamp(), // Use createdAt instead of requestTime
+        'below2': ride.passengerCount <= 2, // Add below2 field
+        'passengerCount': ride.passengerCount,
+        'isAsambeGirl': ride.isAsambeGirl,
+        'isAsambeStudent': ride.isAsambeStudent,
+        'isAsambeLuxury': ride.isAsambeLuxury,
+      };
+      
+      final DocumentReference docRef = await _requestsCollection.add(requestData);
       return docRef.id;
     } catch (e) {
       rethrow;
     }
   }
 
-  // Get ride by ID
+  // Get ride by ID (checks both requests and rides collections)
   Future<RideModel?> getRideById(String rideId) async {
     try {
-      final DocumentSnapshot doc = await _ridesCollection.doc(rideId).get();
+      // First check in requests collection
+      DocumentSnapshot doc = await _requestsCollection.doc(rideId).get();
       if (doc.exists) {
         return RideModel.fromMap(doc.data() as Map<String, dynamic>, doc.id);
+      }
+      
+      // If not found in requests, check in rides collection
+      doc = await _ridesCollection.doc(rideId).get();
+      if (doc.exists) {
+        return RideModel.fromMap(doc.data() as Map<String, dynamic>, doc.id);
+      }
+      
+      return null;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Update ride (updates in the appropriate collection)
+  Future<void> updateRide(RideModel ride) async {
+    try {
+      // First check if it exists in requests collection
+      final requestDoc = await _requestsCollection.doc(ride.id).get();
+      if (requestDoc.exists) {
+        // Convert to requests collection format for updates
+        final Map<String, dynamic> updateData = {
+          'userId': ride.passengerId,
+          'pickupAddress': ride.pickupAddress,
+          'pickupCoordinates': [ride.pickupLat, ride.pickupLng],
+          'dropoffAddress': ride.dropoffAddress,
+          'dropoffCoordinates': [ride.dropoffLat, ride.dropoffLng],
+          'vehicleType': ride.vehicleType,
+          'distance': ride.distance,
+          'estimatedFare': ride.estimatedFare,
+          'driverId': ride.driverId,
+          'status': _convertStatusToString(ride.status), // Convert status to string
+          'updatedAt': FieldValue.serverTimestamp(),
+        };
+        await _requestsCollection.doc(ride.id).update(updateData);
+      } else {
+        // If not in requests, update in rides collection
+        await _ridesCollection.doc(ride.id).update(ride.toMap());
+      }
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Helper method to convert RideStatus enum to string
+  String _convertStatusToString(RideStatus status) {
+    switch (status) {
+      case RideStatus.requested:
+        return 'pending';
+      case RideStatus.accepted:
+        return 'accepted';
+      case RideStatus.driverArrived:
+        return 'driver_arrived';
+      case RideStatus.inProgress:
+        return 'in_progress';
+      case RideStatus.completed:
+        return 'completed';
+      case RideStatus.cancelled:
+        return 'cancelled';
+    }
+  }
+
+  // ========== SCHEDULED REQUEST METHODS ==========
+
+  // Create a new scheduled request
+  Future<String> createScheduledRequest(Map<String, dynamic> requestData) async {
+    try {
+      final DocumentReference docRef = await _scheduledRequestsCollection.add(requestData);
+      return docRef.id;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Get scheduled requests for drivers based on their preferred towns
+  Stream<List<Map<String, dynamic>>> getScheduledRequestsForDriver(
+    List<String> driverPreferredTowns,
+    Position driverLocation,
+  ) {
+    return _scheduledRequestsCollection
+        .where('status', isEqualTo: 'pending')
+        .orderBy('scheduledDateTime', descending: false)
+        .snapshots()
+        .handleError((error) {
+          // Handle index building error gracefully
+          print('⚠️ Firestore index still building for scheduledRequests. Using fallback query.');
+          // Return empty list while index is building
+          return const Stream.empty();
+        })
+        .map((snapshot) {
+      final List<Map<String, dynamic>> filteredRequests = [];
+      
+      for (final doc in snapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final pickupAddress = data['pickupAddress'] as String? ?? '';
+        
+        // Check if pickup address contains any of driver's preferred towns
+        final bool matchesPreferredTown = driverPreferredTowns.any((town) =>
+            pickupAddress.toLowerCase().contains(town.toLowerCase()));
+        
+        if (matchesPreferredTown) {
+          // Calculate distance for progressive expansion
+          final pickupCoordinates = data['pickupCoordinates'] as List?;
+          if (pickupCoordinates != null && pickupCoordinates.length >= 2) {
+            final distance = _calculateDistance(
+              driverLocation.latitude,
+              driverLocation.longitude,
+              pickupCoordinates[0].toDouble(),
+              pickupCoordinates[1].toDouble(),
+            );
+            
+            final scheduledDateTime = (data['scheduledDateTime'] as Timestamp).toDate();
+            final now = DateTime.now();
+            final timeUntilScheduled = scheduledDateTime.difference(now).inMinutes;
+            
+            // Progressive distance expansion based on time
+            double maxDistance;
+            if (timeUntilScheduled > 10) {
+              maxDistance = 1.0; // Start with 1km
+            } else if (timeUntilScheduled > 5) {
+              maxDistance = 5.0; // Expand to 5km after 10 minutes
+            } else {
+              maxDistance = 10.0; // Expand to 10km after 5 minutes
+            }
+            
+            if (distance <= maxDistance) {
+              data['id'] = doc.id;
+              data['distance'] = distance;
+              data['timeUntilScheduled'] = timeUntilScheduled;
+              filteredRequests.add(data);
+            }
+          }
+        }
+      }
+      
+      // Sort by distance and time until scheduled
+      filteredRequests.sort((a, b) {
+        final distanceA = a['distance'] as double;
+        final distanceB = b['distance'] as double;
+        final timeA = a['timeUntilScheduled'] as int;
+        final timeB = b['timeUntilScheduled'] as int;
+        
+        // Prioritize by distance first, then by urgency
+        final distanceComparison = distanceA.compareTo(distanceB);
+        if (distanceComparison != 0) return distanceComparison;
+        return timeA.compareTo(timeB);
+      });
+      
+      return filteredRequests;
+    });
+  }
+
+  // Accept a scheduled request
+  Future<void> acceptScheduledRequest(String requestId, String driverId) async {
+    try {
+      // Get the scheduled request to get passenger ID
+      final requestDoc = await _scheduledRequestsCollection.doc(requestId).get();
+      if (!requestDoc.exists) {
+        throw Exception('Scheduled request not found');
+      }
+      
+      final requestData = requestDoc.data() as Map<String, dynamic>;
+      final passengerId = requestData['userId'] as String?;
+      final scheduledDateTime = (requestData['scheduledDateTime'] as Timestamp).toDate();
+      final paymentType = requestData['paymentType'] as String? ?? 'Cash';
+      final estimatedFare = requestData['estimatedFare'] as double? ?? 0.0;
+      final status = requestData['status'] as String? ?? 'pending';
+      
+      if (passengerId == null) {
+        throw Exception('Passenger ID not found in scheduled request');
+      }
+      
+      // Check if request is still available
+      if (status != 'pending') {
+        throw Exception('Scheduled request is no longer available for acceptance');
+      }
+      
+      // Check if driver is already assigned
+      if (requestData['driverId'] != null) {
+        throw Exception('Scheduled request has already been accepted by another driver');
+      }
+      
+      // Check daily limit (3 bookings per day)
+      final today = DateTime.now();
+      final startOfDay = DateTime(today.year, today.month, today.day);
+      final endOfDay = startOfDay.add(const Duration(days: 1));
+      
+      final todayBookings = await _scheduledRequestsCollection
+          .where('driverId', isEqualTo: driverId)
+          .where('status', isEqualTo: 'accepted')
+          .where('scheduledDateTime', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+          .where('scheduledDateTime', isLessThan: Timestamp.fromDate(endOfDay))
+          .get();
+      
+      if (todayBookings.docs.length >= 3) {
+        throw Exception('You have already accepted 3 scheduled bookings for today. Please try again tomorrow.');
+      }
+      
+      // Check for time conflicts (30-minute buffer)
+      final conflictStart = scheduledDateTime.subtract(const Duration(minutes: 30));
+      final conflictEnd = scheduledDateTime.add(const Duration(minutes: 30));
+      
+      final conflictingBookings = await _scheduledRequestsCollection
+          .where('driverId', isEqualTo: driverId)
+          .where('status', isEqualTo: 'accepted')
+          .where('scheduledDateTime', isGreaterThanOrEqualTo: Timestamp.fromDate(conflictStart))
+          .where('scheduledDateTime', isLessThanOrEqualTo: Timestamp.fromDate(conflictEnd))
+          .get();
+      
+      if (conflictingBookings.docs.isNotEmpty) {
+        throw Exception('You have a conflicting scheduled booking within 30 minutes of this time. Please choose a different time slot.');
+      }
+      
+      // Check if driver is available (not on another ride)
+      final driverActiveRide = await getActiveRideForDriver(driverId);
+      if (driverActiveRide != null) {
+        throw Exception('You are already on an active ride. Please complete it first.');
+      }
+      
+      // Update the scheduled request
+      await _scheduledRequestsCollection.doc(requestId).update({
+        'driverId': driverId,
+        'status': 'accepted',
+        'acceptedAt': FieldValue.serverTimestamp(),
+      });
+      
+      // Create chat between driver and passenger
+      await createOrGetChat(driverId, passengerId);
+      
+      // Send notification to passenger
+      final notificationRef = _notificationsCollection.doc();
+      final notification = NotificationModel(
+        id: notificationRef.id,
+        userId: passengerId,
+        title: 'Scheduled Ride Accepted',
+        body: 'Your scheduled ride has been accepted by a driver!',
+        timestamp: Timestamp.fromDate(DateTime.now()),
+        isRead: false,
+        category: NotificationCategory.ride,
+        priority: NotificationPriority.high,
+      );
+      await notificationRef.set(notification.toMap());
+      
+      print('✅ Scheduled request accepted successfully: $requestId by driver: $driverId');
+      
+    } catch (e) {
+      print('❌ Error accepting scheduled request: $e');
+      rethrow;
+    }
+  }
+
+  // Get scheduled request by ID
+  Future<Map<String, dynamic>?> getScheduledRequestById(String requestId) async {
+    try {
+      final doc = await _scheduledRequestsCollection.doc(requestId).get();
+      if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
+        data['id'] = doc.id;
+        return data;
       }
       return null;
     } catch (e) {
@@ -431,13 +857,387 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  // Update ride
-  Future<void> updateRide(RideModel ride) async {
+  // Get driver's accepted scheduled requests
+  Stream<List<Map<String, dynamic>>> getDriverAcceptedScheduledRequests(String driverId) {
+    return _scheduledRequestsCollection
+        .where('driverId', isEqualTo: driverId)
+        .where('status', isEqualTo: 'accepted')
+        .orderBy('scheduledDateTime', descending: false)
+        .snapshots()
+        .map((snapshot) {
+      final List<Map<String, dynamic>> acceptedRequests = [];
+      
+      for (final doc in snapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        data['id'] = doc.id;
+        
+        // Calculate time until scheduled
+        final scheduledDateTime = (data['scheduledDateTime'] as Timestamp).toDate();
+        final now = DateTime.now();
+        final timeUntilScheduled = scheduledDateTime.difference(now).inMinutes;
+        data['timeUntilScheduled'] = timeUntilScheduled;
+        
+        acceptedRequests.add(data);
+      }
+      
+      return acceptedRequests;
+    });
+  }
+
+  // Complete a scheduled booking and track earnings
+  Future<void> completeScheduledBooking(String requestId, double actualFare) async {
     try {
-      await _ridesCollection.doc(ride.id).update(ride.toMap());
+      final requestDoc = await _scheduledRequestsCollection.doc(requestId).get();
+      if (!requestDoc.exists) {
+        throw Exception('Scheduled request not found');
+      }
+      
+      final requestData = requestDoc.data() as Map<String, dynamic>;
+      final driverId = requestData['driverId'] as String?;
+      final passengerId = requestData['userId'] as String?;
+      final paymentType = requestData['paymentType'] as String? ?? 'Cash';
+      final estimatedFare = requestData['estimatedFare'] as double? ?? 0.0;
+      final status = requestData['status'] as String? ?? 'pending';
+      
+      if (driverId == null || passengerId == null) {
+        throw Exception('Driver or passenger ID not found');
+      }
+      
+      // Check if booking is in progress
+      if (status != 'in_progress') {
+        throw Exception('Scheduled booking is not in progress. Current status: $status');
+      }
+      
+      final now = DateTime.now();
+      
+      // Update scheduled request status
+      await _scheduledRequestsCollection.doc(requestId).update({
+        'status': 'completed',
+        'actualFare': actualFare,
+        'completedAt': FieldValue.serverTimestamp(),
+        'dropoffTime': FieldValue.serverTimestamp(),
+      });
+      
+      // Track earnings based on payment type
+      await _trackScheduledBookingEarnings(
+        driverId: driverId,
+        requestId: requestId,
+        actualFare: actualFare,
+        paymentType: paymentType,
+        isScheduledBooking: true,
+      );
+      
+      // Update driver status to available
+      await updateDriverStatus(driverId, DriverStatus.online);
+      
+      // Handle payment based on payment type
+      if (paymentType.toLowerCase() == 'card') {
+        // For card payments, payment was already processed
+        print('✅ Card payment already processed for scheduled booking');
+      } else {
+        // For cash payments, update passenger's owing amount if there's a difference
+        if (actualFare > estimatedFare) {
+          final difference = actualFare - estimatedFare;
+          await updateUserOwing(passengerId, difference);
+        }
+      }
+      
+      // Create notification for passenger
+      final notificationRef = _notificationsCollection.doc();
+      final notification = NotificationModel(
+        id: notificationRef.id,
+        userId: passengerId,
+        title: 'Scheduled Ride Completed',
+        body: 'Your scheduled ride has been completed. Fare: R${actualFare.toStringAsFixed(2)}',
+        timestamp: Timestamp.fromDate(now),
+        isRead: false,
+        category: NotificationCategory.ride,
+        priority: NotificationPriority.high,
+      );
+      await notificationRef.set(notification.toMap());
+      
+      print('✅ Scheduled booking completed successfully: $requestId, Fare: R${actualFare.toStringAsFixed(2)}');
+      
+    } catch (e) {
+      print('❌ Error completing scheduled booking: $e');
+      rethrow;
+    }
+  }
+
+  // Cancel a scheduled booking
+  Future<void> cancelScheduledBooking(String requestId, String cancelledBy, {String? reason}) async {
+    try {
+      final requestDoc = await _scheduledRequestsCollection.doc(requestId).get();
+      if (!requestDoc.exists) {
+        throw Exception('Scheduled request not found');
+      }
+      
+      final requestData = requestDoc.data() as Map<String, dynamic>;
+      final driverId = requestData['driverId'] as String?;
+      final passengerId = requestData['userId'] as String?;
+      final status = requestData['status'] as String?;
+      
+      if (status != 'accepted') {
+        throw Exception('Can only cancel accepted scheduled bookings');
+      }
+      
+      final now = DateTime.now();
+      final cancellationReason = reason ?? 'Cancelled by ${cancelledBy == driverId ? 'driver' : 'passenger'}';
+      
+      // Update scheduled request status
+      await _scheduledRequestsCollection.doc(requestId).update({
+        'status': 'cancelled',
+        'cancelledBy': cancelledBy,
+        'cancellationReason': cancellationReason,
+        'cancelledAt': FieldValue.serverTimestamp(),
+      });
+      
+      // Create notification for the other party
+      final notificationRef = _notificationsCollection.doc();
+      final notification = NotificationModel(
+        id: notificationRef.id,
+        userId: cancelledBy == driverId ? passengerId! : driverId!,
+        title: 'Scheduled Ride Cancelled',
+        body: 'Your scheduled ride has been cancelled. Reason: $cancellationReason',
+        timestamp: Timestamp.fromDate(now),
+        isRead: false,
+        category: NotificationCategory.ride,
+        priority: NotificationPriority.high,
+      );
+      await notificationRef.set(notification.toMap());
+      
     } catch (e) {
       rethrow;
     }
+  }
+
+  // Update scheduled request status
+  Future<void> updateScheduledRequestStatus(String requestId, String status) async {
+    try {
+      await _scheduledRequestsCollection.doc(requestId).update({
+        'status': status,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Error updating scheduled request status: $e');
+      rethrow;
+    }
+  }
+
+  // Track earnings for scheduled bookings
+  Future<void> _trackScheduledBookingEarnings({
+    required String driverId,
+    required String requestId,
+    required double actualFare,
+    required String paymentType,
+    required bool isScheduledBooking,
+  }) async {
+    try {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      
+      // Get driver's earnings document
+      final driverEarningsRef = _driversCollection.doc(driverId).collection('earnings').doc('daily');
+      final earningsDoc = await driverEarningsRef.get();
+      
+      Map<String, dynamic> earningsData = {};
+      if (earningsDoc.exists) {
+        earningsData = earningsDoc.data() as Map<String, dynamic>;
+      }
+      
+      // Update daily earnings
+      final currentEarnings = (earningsData['totalEarnings'] ?? 0.0) as double;
+      final currentRides = (earningsData['totalRides'] ?? 0) as int;
+      final currentScheduledRides = (earningsData['scheduledRides'] ?? 0) as int;
+      
+      // Update based on payment type
+      double cardEarnings = (earningsData['cardEarnings'] ?? 0.0) as double;
+      double cashEarnings = (earningsData['cashEarnings'] ?? 0.0) as double;
+      
+      if (paymentType.toLowerCase() == 'card') {
+        cardEarnings += actualFare;
+      } else {
+        cashEarnings += actualFare;
+      }
+      
+      // Update earnings data
+      final updatedEarningsData = {
+        'date': Timestamp.fromDate(today),
+        'totalEarnings': currentEarnings + actualFare,
+        'totalRides': currentRides + 1,
+        'scheduledRides': currentScheduledRides + (isScheduledBooking ? 1 : 0),
+        'cardEarnings': cardEarnings,
+        'cashEarnings': cashEarnings,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      };
+      
+      await driverEarningsRef.set(updatedEarningsData, SetOptions(merge: true));
+      
+      // Add to ride history
+      final rideHistoryRef = _driversCollection.doc(driverId).collection('rideHistory').doc(requestId);
+      final rideHistoryData = {
+        'requestId': requestId,
+        'fare': actualFare,
+        'paymentType': paymentType,
+        'isScheduledBooking': isScheduledBooking,
+        'completedAt': FieldValue.serverTimestamp(),
+        'status': 'completed',
+      };
+      
+      await rideHistoryRef.set(rideHistoryData, SetOptions(merge: true));
+      
+    } catch (e) {
+      print('Error tracking scheduled booking earnings: $e');
+      rethrow;
+    }
+  }
+
+  // Fallback method for getting scheduled requests when index is building
+  Stream<List<Map<String, dynamic>>> getScheduledRequestsForDriverFallback(
+    List<String> driverPreferredTowns,
+    Position driverLocation,
+  ) {
+    return _scheduledRequestsCollection
+        .where('status', isEqualTo: 'pending')
+        .snapshots()
+        .map((snapshot) {
+      final List<Map<String, dynamic>> filteredRequests = [];
+      
+      for (final doc in snapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final pickupAddress = data['pickupAddress'] as String? ?? '';
+        
+        // Check if pickup address contains any of driver's preferred towns
+        final bool matchesPreferredTown = driverPreferredTowns.any((town) =>
+            pickupAddress.toLowerCase().contains(town.toLowerCase()));
+        
+        if (matchesPreferredTown) {
+          // Calculate distance for progressive expansion
+          final pickupCoordinates = data['pickupCoordinates'] as List?;
+          if (pickupCoordinates != null && pickupCoordinates.length >= 2) {
+            final distance = _calculateDistance(
+              driverLocation.latitude,
+              driverLocation.longitude,
+              pickupCoordinates[0].toDouble(),
+              pickupCoordinates[1].toDouble(),
+            );
+            
+            final scheduledDateTime = (data['scheduledDateTime'] as Timestamp).toDate();
+            final now = DateTime.now();
+            final timeUntilScheduled = scheduledDateTime.difference(now).inMinutes;
+            
+            // Progressive distance expansion based on time
+            double maxDistance;
+            if (timeUntilScheduled > 10) {
+              maxDistance = 1.0; // Start with 1km
+            } else if (timeUntilScheduled > 5) {
+              maxDistance = 5.0; // Expand to 5km after 10 minutes
+            } else {
+              maxDistance = 10.0; // Expand to 10km after 5 minutes
+            }
+            
+            if (distance <= maxDistance) {
+              data['id'] = doc.id;
+              data['distance'] = distance;
+              data['timeUntilScheduled'] = timeUntilScheduled;
+              filteredRequests.add(data);
+            }
+          }
+        }
+      }
+      
+      // Sort by distance and time until scheduled (client-side sorting)
+      filteredRequests.sort((a, b) {
+        final distanceA = a['distance'] as double;
+        final distanceB = b['distance'] as double;
+        final timeA = a['timeUntilScheduled'] as int;
+        final timeB = b['timeUntilScheduled'] as int;
+        
+        // Prioritize by distance first, then by urgency
+        final distanceComparison = distanceA.compareTo(distanceB);
+        if (distanceComparison != 0) return distanceComparison;
+        return timeA.compareTo(timeB);
+      });
+      
+      return filteredRequests;
+    });
+  }
+
+  // Cancel a scheduled request
+  Future<void> cancelScheduledRequest(String requestId, String userId, {String? reason, bool isDriver = false}) async {
+    try {
+      final batch = _firestore.batch();
+      final now = DateTime.now();
+      final cancellationReason = reason ?? 'Scheduled request cancelled';
+
+      // Update the scheduled request status
+      batch.update(_scheduledRequestsCollection.doc(requestId), {
+        'status': 'cancelled',
+        'cancelledAt': FieldValue.serverTimestamp(),
+        'cancellationReason': cancellationReason,
+        'cancelledBy': userId,
+        'isDriverCancellation': isDriver,
+      });
+
+      // Get the request data to send notifications
+      final requestDoc = await _scheduledRequestsCollection.doc(requestId).get();
+      if (requestDoc.exists) {
+        final requestData = requestDoc.data() as Map<String, dynamic>;
+        final driverId = requestData['driverId'] as String?;
+        final passengerId = requestData['userId'] as String?;
+
+        // Send notifications
+        if (isDriver && passengerId != null) {
+          // Driver cancelled - notify passenger
+          final notificationRef = _notificationsCollection.doc();
+          final notification = NotificationModel(
+            id: notificationRef.id,
+            userId: passengerId,
+            title: 'Scheduled Ride Cancelled',
+            body: 'Your scheduled ride has been cancelled by the driver. Reason: $cancellationReason',
+            timestamp: Timestamp.fromDate(now),
+            isRead: false,
+            category: NotificationCategory.ride,
+            priority: NotificationPriority.high,
+          );
+          batch.set(notificationRef, notification.toMap());
+        } else if (!isDriver && driverId != null) {
+          // Passenger cancelled - notify driver
+          final notificationRef = _notificationsCollection.doc();
+          final notification = NotificationModel(
+            id: notificationRef.id,
+            userId: driverId,
+            title: 'Scheduled Ride Cancelled',
+            body: 'A scheduled ride has been cancelled by the passenger. Reason: $cancellationReason',
+            timestamp: Timestamp.fromDate(now),
+            isRead: false,
+            category: NotificationCategory.ride,
+            priority: NotificationPriority.high,
+          );
+          batch.set(notificationRef, notification.toMap());
+        }
+      }
+
+      await batch.commit();
+    } catch (e) {
+      print('Error cancelling scheduled request: $e');
+      rethrow;
+    }
+  }
+
+  // Helper method to calculate distance
+  double _calculateDistance(double lat1, double lng1, double lat2, double lng2) {
+    const double earthRadius = 6371; // Earth's radius in kilometers
+    
+    final double dLat = (lat2 - lat1) * (3.141592653589793 / 180);
+    final double dLng = (lng2 - lng1) * (3.141592653589793 / 180);
+    
+    final double a = sin(dLat / 2) * sin(dLat / 2) +
+        cos(lat1 * 3.141592653589793 / 180) * cos(lat2 * 3.141592653589793 / 180) *
+        sin(dLng / 2) * sin(dLng / 2);
+    
+    final double c = 2 * atan2(sqrt(a), sqrt(1 - a));
+    return earthRadius * c;
   }
 
   /// Cancels a ride by the driver.
@@ -476,9 +1276,9 @@ class DatabaseService extends ChangeNotifier {
       batch.set(driverRideHistoryRef, cancelledRide.toMap(), SetOptions(merge: true));
 
       // 2. Reset the main ride request to be available again
-      final mainRideRef = _ridesCollection.doc(ride.id);
+      final mainRideRef = _requestsCollection.doc(ride.id);
       final mainRideUpdate = {
-        'status': RideStatus.requested.index, // Reset to requested so it appears in request list again
+        'status': 'pending', // Reset to pending so it appears in request list again
         'driverId': null, // Remove driver association
         'cancelledAt': now.millisecondsSinceEpoch,
         'cancellationReason': cancellationReason,
@@ -532,7 +1332,7 @@ class DatabaseService extends ChangeNotifier {
       return Stream.value([]);
     }
     try {
-      return _ridesCollection.where('status', isEqualTo: RideStatus.requested.index).snapshots().map((snapshot) => snapshot.docs
+      return _requestsCollection.where('status', isEqualTo: 'pending').snapshots().map((snapshot) => snapshot.docs
           .map((doc) => RideModel.fromMap(
                 doc.data() as Map<String, dynamic>,
                 doc.id,
@@ -546,7 +1346,22 @@ class DatabaseService extends ChangeNotifier {
   // Get active ride for user
   Future<RideModel?> getActiveRideForUser(String userId) async {
     try {
-      final QuerySnapshot snapshot = await _ridesCollection
+      // First check requests collection for active rides
+      final requestsSnapshot = await _requestsCollection
+          .where('userId', isEqualTo: userId)
+          .where('status', whereIn: ['accepted', 'driver_arrived', 'in_progress'])
+          .limit(1)
+          .get();
+
+      if (requestsSnapshot.docs.isNotEmpty) {
+        return RideModel.fromMap(
+          requestsSnapshot.docs.first.data() as Map<String, dynamic>,
+          requestsSnapshot.docs.first.id,
+        );
+      }
+
+      // If not found in requests, check rides collection
+      final ridesSnapshot = await _ridesCollection
           .where('passengerId', isEqualTo: userId)
           .where('status', whereIn: [
             RideStatus.accepted.index,
@@ -556,10 +1371,10 @@ class DatabaseService extends ChangeNotifier {
           .limit(1)
           .get();
 
-      if (snapshot.docs.isNotEmpty) {
+      if (ridesSnapshot.docs.isNotEmpty) {
         return RideModel.fromMap(
-          snapshot.docs.first.data() as Map<String, dynamic>,
-          snapshot.docs.first.id,
+          ridesSnapshot.docs.first.data() as Map<String, dynamic>,
+          ridesSnapshot.docs.first.id,
         );
       }
       return null;
@@ -571,7 +1386,22 @@ class DatabaseService extends ChangeNotifier {
   // Get active ride for driver
   Future<RideModel?> getActiveRideForDriver(String driverId) async {
     try {
-      final QuerySnapshot snapshot = await _ridesCollection
+      // First check requests collection for active rides
+      final requestsSnapshot = await _requestsCollection
+          .where('driverId', isEqualTo: driverId)
+          .where('status', whereIn: ['accepted', 'driver_arrived', 'in_progress'])
+          .limit(1)
+          .get();
+
+      if (requestsSnapshot.docs.isNotEmpty) {
+        return RideModel.fromMap(
+          requestsSnapshot.docs.first.data() as Map<String, dynamic>,
+          requestsSnapshot.docs.first.id,
+        );
+      }
+
+      // If not found in requests, check rides collection
+      final ridesSnapshot = await _ridesCollection
           .where('driverId', isEqualTo: driverId)
           .where('status', whereIn: [
             RideStatus.accepted.index,
@@ -581,10 +1411,10 @@ class DatabaseService extends ChangeNotifier {
           .limit(1)
           .get();
 
-      if (snapshot.docs.isNotEmpty) {
+      if (ridesSnapshot.docs.isNotEmpty) {
         return RideModel.fromMap(
-          snapshot.docs.first.data() as Map<String, dynamic>,
-          snapshot.docs.first.id,
+          ridesSnapshot.docs.first.data() as Map<String, dynamic>,
+          ridesSnapshot.docs.first.id,
         );
       }
       return null;
@@ -616,14 +1446,26 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  // Listen to ride updates
-  Stream<RideModel> listenToRideUpdates(String rideId) {
-    return _ridesCollection.doc(rideId).snapshots().map(
-          (snapshot) => RideModel.fromMap(
-            snapshot.data() as Map<String, dynamic>,
-            snapshot.id,
-          ),
-        );
+  // Listen to ride updates (checks both requests and rides collections)
+  Stream<RideModel> listenToRideUpdates(String rideId) async* {
+    // First check if it exists in requests collection
+    final requestDoc = await _requestsCollection.doc(rideId).get();
+    if (requestDoc.exists) {
+      yield* _requestsCollection.doc(rideId).snapshots().map(
+        (snapshot) => RideModel.fromMap(
+          snapshot.data() as Map<String, dynamic>,
+          snapshot.id,
+        ),
+      );
+    } else {
+      // If not in requests, listen to rides collection
+      yield* _ridesCollection.doc(rideId).snapshots().map(
+        (snapshot) => RideModel.fromMap(
+          snapshot.data() as Map<String, dynamic>,
+          snapshot.id,
+        ),
+      );
+    }
   }
 
   // Check and create basic driver profile if missing
@@ -688,14 +1530,32 @@ class DatabaseService extends ChangeNotifier {
       }
 
       final userData = userDoc.data() as Map<String, dynamic>;
-      return userData['isDriver'] == true && 
-             (userData['requiresDriverSignup'] == true || 
-              userData['driverProfileCompleted'] != true);
+      
+      // If user is not a driver, they don't need driver signup
+      if (userData['isDriver'] != true) {
+        return false;
+      }
+      
+      // If requiresDriverSignup is explicitly false, signup is completed
+      if (userData['requiresDriverSignup'] == false) {
+        return false;
+      }
+      
+      // If requiresDriverSignup is true, they need to complete signup
+      if (userData['requiresDriverSignup'] == true) {
+        return true;
+      }
+      
+      // If requiresDriverSignup is not set, check if driver profile exists
+      final driverDoc = await _driversCollection.doc(userId).get();
+      return !driverDoc.exists;
     } catch (e) {
       print('Error checking driver signup status: $e');
       return false;
     }
   }
+
+
 
   // Set isOnline for driver
   Future<void> setDriverOnlineStatus(String driverId, bool isOnline) async {
@@ -722,12 +1582,14 @@ class DatabaseService extends ChangeNotifier {
     final startOfDay = DateTime(now.year, now.month, now.day);
     final endOfDay = DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
 
-    final QuerySnapshot snapshot =
-        await _ridesCollection.where('driverId', isEqualTo: driverId).where('status', isEqualTo: RideStatus.completed.index).where('dropoffTime', isGreaterThanOrEqualTo: startOfDay.millisecondsSinceEpoch).where('dropoffTime', isLessThanOrEqualTo: endOfDay.millisecondsSinceEpoch).get();
-
     double totalEarnings = 0.0;
     double cardEarnings = 0.0;
     int rideCount = 0;
+    int scheduledRideCount = 0;
+
+    // Get regular rides
+    final QuerySnapshot snapshot =
+        await _ridesCollection.where('driverId', isEqualTo: driverId).where('status', isEqualTo: RideStatus.completed.index).where('dropoffTime', isGreaterThanOrEqualTo: startOfDay.millisecondsSinceEpoch).where('dropoffTime', isLessThanOrEqualTo: endOfDay.millisecondsSinceEpoch).get();
 
     for (var doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
@@ -744,10 +1606,35 @@ class DatabaseService extends ChangeNotifier {
       }
     }
 
+    // Get completed scheduled bookings
+    final scheduledSnapshot = await _scheduledRequestsCollection
+        .where('driverId', isEqualTo: driverId)
+        .where('status', isEqualTo: 'completed')
+        .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+        .where('completedAt', isLessThanOrEqualTo: Timestamp.fromDate(endOfDay))
+        .get();
+
+    for (var doc in scheduledSnapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final fare = (data['actualFare'] ?? data['estimatedFare'] ?? 0).toDouble();
+      final paymentType = data['paymentType'] as String? ?? 'Cash';
+      
+      totalEarnings += fare;
+      rideCount++;
+      scheduledRideCount++;
+      
+      // Calculate card earnings with 6.5% processing fee deduction
+      if (paymentType == 'Card') {
+        final cardFare = fare * (1 - 0.065); // Deduct 6.5% processing fee
+        cardEarnings += cardFare;
+      }
+    }
+
     return {
       'earnings': totalEarnings,
       'cardEarnings': cardEarnings,
       'rides': rideCount,
+      'scheduledRides': scheduledRideCount,
     };
   }
 
@@ -764,12 +1651,14 @@ class DatabaseService extends ChangeNotifier {
       throw Exception('Invalid period: $period');
     }
 
-    final QuerySnapshot snapshot =
-        await _ridesCollection.where('driverId', isEqualTo: driverId).where('status', isEqualTo: RideStatus.completed.index).where('dropoffTime', isGreaterThanOrEqualTo: start.millisecondsSinceEpoch).where('dropoffTime', isLessThanOrEqualTo: end.millisecondsSinceEpoch).get();
-
     double totalEarnings = 0.0;
     double cardEarnings = 0.0;
     int rideCount = 0;
+    int scheduledRideCount = 0;
+
+    // Get regular rides
+    final QuerySnapshot snapshot =
+        await _ridesCollection.where('driverId', isEqualTo: driverId).where('status', isEqualTo: RideStatus.completed.index).where('dropoffTime', isGreaterThanOrEqualTo: start.millisecondsSinceEpoch).where('dropoffTime', isLessThanOrEqualTo: end.millisecondsSinceEpoch).get();
 
     for (var doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
@@ -786,46 +1675,123 @@ class DatabaseService extends ChangeNotifier {
       }
     }
 
+    // Get completed scheduled bookings
+    final scheduledSnapshot = await _scheduledRequestsCollection
+        .where('driverId', isEqualTo: driverId)
+        .where('status', isEqualTo: 'completed')
+        .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
+        .where('completedAt', isLessThanOrEqualTo: Timestamp.fromDate(end))
+        .get();
+
+    for (var doc in scheduledSnapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final fare = (data['actualFare'] ?? data['estimatedFare'] ?? 0).toDouble();
+      final paymentType = data['paymentType'] as String? ?? 'Cash';
+      
+      totalEarnings += fare;
+      rideCount++;
+      scheduledRideCount++;
+      
+      // Calculate card earnings with 6.5% processing fee deduction
+      if (paymentType == 'Card') {
+        final cardFare = fare * (1 - 0.065); // Deduct 6.5% processing fee
+        cardEarnings += cardFare;
+      }
+    }
+
     return {
       'earnings': totalEarnings,
       'cardEarnings': cardEarnings,
       'rides': rideCount,
+      'scheduledRides': scheduledRideCount,
     };
   }
 
-  // Helper to fetch profile image from drivers collection if not present in users
+  // Helper to fetch profile image from users or drivers collection
   Future<String?> getDriverProfileImage(String userId) async {
     try {
-      final doc = await _driversCollection.doc(userId).get();
-      if (doc.exists) {
-        final data = doc.data() as Map<String, dynamic>;
-        return data['profileImage'] as String?;
+      // First check user document for profile image
+      final userDoc = await _usersCollection.doc(userId).get();
+      if (userDoc.exists) {
+        final userData = userDoc.data() as Map<String, dynamic>;
+        final userProfileImage = userData['profileImage'] as String?;
+        if (userProfileImage != null && userProfileImage.isNotEmpty) {
+          return userProfileImage;
+        }
       }
+      
+      // If not found in user document, check driver document
+      final driverDoc = await _driversCollection.doc(userId).get();
+      if (driverDoc.exists) {
+        final driverData = driverDoc.data() as Map<String, dynamic>;
+        
+        // Check for profile image in documents
+        final documents = driverData['documents'] as Map<String, dynamic>? ?? {};
+        final profileImageUrl = documents['Driver Profile Image'] as String?;
+        if (profileImageUrl != null && profileImageUrl.isNotEmpty) {
+          return profileImageUrl;
+        }
+        
+        // Check for profile image field
+        final driverProfileImage = driverData['profileImage'] as String?;
+        if (driverProfileImage != null && driverProfileImage.isNotEmpty) {
+          return driverProfileImage;
+        }
+      }
+      
       return null;
     } catch (e) {
+      print('Error fetching driver profile image: $e');
       return null;
     }
   }
 
   // Get all accepted rides for a driver (for ride history)
   Future<List<Map<String, dynamic>>> getAcceptedRides(String driverId) async {
-    final QuerySnapshot snapshot = await _driversCollection.doc(driverId).collection('rideHistory').where('status', whereIn: [RideStatus.completed.index, RideStatus.cancelled.index, RideStatus.accepted.index]).orderBy('requestTime', descending: true).get();
+    try {
+      final QuerySnapshot snapshot = await _driversCollection
+          .doc(driverId)
+          .collection('rideHistory')
+          .where('status', whereIn: [RideStatus.completed.index, RideStatus.cancelled.index, RideStatus.accepted.index])
+          .orderBy('requestTime', descending: true)
+          .get();
 
-    return snapshot.docs
-        .map((doc) {
-          final data = doc.data() as Map<String, dynamic>?;
-          if (data == null) {
-            return null;
-          }
-          return {
-            'fare': (data['actualFare'] ?? data['estimatedFare'] ?? 0).toDouble(),
-            'date': data['requestTime'], // Use requestTime for consistent sorting
-            'status': data['status'],
-            'id': doc.id,
-          };
-        })
-        .whereType<Map<String, dynamic>>()
-        .toList(); // Filter out any null maps
+      return snapshot.docs
+          .map((doc) {
+            final data = doc.data() as Map<String, dynamic>?;
+            if (data == null) {
+              return null;
+            }
+            
+            // Handle different timestamp formats
+            dynamic requestTime = data['requestTime'];
+            int? timestamp;
+            
+            if (requestTime is Timestamp) {
+              timestamp = requestTime.millisecondsSinceEpoch;
+            } else if (requestTime is int) {
+              timestamp = requestTime;
+            } else if (requestTime is String) {
+              timestamp = int.tryParse(requestTime);
+            }
+            
+            return {
+              'fare': (data['actualFare'] ?? data['estimatedFare'] ?? 0).toDouble(),
+              'date': timestamp,
+              'status': data['status'],
+              'id': doc.id,
+              'pickupAddress': data['pickupAddress'] ?? 'Unknown Pickup',
+              'destinationAddress': data['dropoffAddress'] ?? 'Unknown Destination',
+              'passengerId': data['passengerId'] ?? '',
+              'earnings': data['earnings'] ?? 0.0,
+            };
+          })
+          .whereType<Map<String, dynamic>>()
+          .toList();
+    } catch (e) {
+      print('Error fetching accepted rides: $e');
+      return [];
+    }
   }
 
   // Rate a passenger after ride completion
@@ -875,6 +1841,82 @@ class DatabaseService extends ChangeNotifier {
       }
     } catch (e) {
       throw Exception('Failed to submit rating: $e');
+    }
+  }
+
+  // Get all rides for a passenger (for ride history)
+  Future<List<Map<String, dynamic>>> getPassengerRideHistory(String passengerId) async {
+    try {
+      // Get rides from both collections
+      final requestsSnapshot = await _requestsCollection
+          .where('userId', isEqualTo: passengerId)
+          .where('status', whereIn: ['completed', 'cancelled', 'accepted'])
+          .orderBy('timestamp', descending: true)
+          .get();
+
+      final ridesSnapshot = await _ridesCollection
+          .where('passengerId', isEqualTo: passengerId)
+          .where('status', whereIn: [RideStatus.completed.index, RideStatus.cancelled.index, RideStatus.accepted.index])
+          .orderBy('requestTime', descending: true)
+          .get();
+
+      final List<Map<String, dynamic>> allRides = [];
+
+      // Process requests collection
+      for (final doc in requestsSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        allRides.add({
+          'fare': (data['actualFare'] ?? data['estimatedFare'] ?? 0).toDouble(),
+          'date': data['timestamp']?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch,
+          'status': _convertStringToStatus(data['status']),
+          'id': doc.id,
+          'pickupAddress': data['pickupAddress'] ?? 'Unknown Pickup',
+          'destinationAddress': data['dropoffAddress'] ?? 'Unknown Destination',
+          'driverId': data['driverId'] ?? '',
+        });
+      }
+
+      // Process rides collection
+      for (final doc in ridesSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        allRides.add({
+          'fare': (data['actualFare'] ?? data['estimatedFare'] ?? 0).toDouble(),
+          'date': data['requestTime']?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch,
+          'status': data['status'],
+          'id': doc.id,
+          'pickupAddress': data['pickupAddress'] ?? 'Unknown Pickup',
+          'destinationAddress': data['dropoffAddress'] ?? 'Unknown Destination',
+          'driverId': data['driverId'] ?? '',
+        });
+      }
+
+      // Sort by date (most recent first)
+      allRides.sort((a, b) => (b['date'] as int).compareTo(a['date'] as int));
+      
+      return allRides;
+    } catch (e) {
+      print('Error fetching passenger ride history: $e');
+      return [];
+    }
+  }
+
+  // Helper method to convert string status to RideStatus index
+  int _convertStringToStatus(String status) {
+    switch (status) {
+      case 'pending':
+        return RideStatus.requested.index;
+      case 'accepted':
+        return RideStatus.accepted.index;
+      case 'driver_arrived':
+        return RideStatus.driverArrived.index;
+      case 'in_progress':
+        return RideStatus.inProgress.index;
+      case 'completed':
+        return RideStatus.completed.index;
+      case 'cancelled':
+        return RideStatus.cancelled.index;
+      default:
+        return RideStatus.requested.index;
     }
   }
 
@@ -1032,19 +2074,37 @@ class DatabaseService extends ChangeNotifier {
       final batch = _firestore.batch();
       final now = DateTime.now();
 
-      // Get the ride
-      final rideDoc = await _ridesCollection.doc(rideId).get();
-      if (!rideDoc.exists) throw Exception('Ride not found');
+      // Get the ride from requests collection first, then rides collection
+      DocumentSnapshot rideDoc = await _requestsCollection.doc(rideId).get();
+      bool isInRequests = rideDoc.exists;
+      
+      if (!isInRequests) {
+        rideDoc = await _ridesCollection.doc(rideId).get();
+        if (!rideDoc.exists) throw Exception('Ride not found');
+      }
 
       final rideData = rideDoc.data() as Map<String, dynamic>;
       final ride = RideModel.fromMap(rideData, rideId);
 
-      // Update the ride status
-      batch.update(_ridesCollection.doc(rideId), {
-        'status': RideStatus.completed.index,
-        'actualFare': actualFare,
-        'dropoffTime': now.millisecondsSinceEpoch,
-      });
+      // Update the ride status in the appropriate collection
+      if (isInRequests) {
+        // Move from requests to rides collection when completing
+        batch.set(_ridesCollection.doc(rideId), {
+          ...rideData,
+          'status': RideStatus.completed.index,
+          'actualFare': actualFare,
+          'dropoffTime': now.millisecondsSinceEpoch,
+        });
+        // Delete from requests collection
+        batch.delete(_requestsCollection.doc(rideId));
+      } else {
+        // Update in rides collection
+        batch.update(_ridesCollection.doc(rideId), {
+          'status': RideStatus.completed.index,
+          'actualFare': actualFare,
+          'dropoffTime': now.millisecondsSinceEpoch,
+        });
+      }
 
       // Add to driver's ride history with earnings
       final driverHistoryRef = _driversCollection.doc(driverId).collection('rideHistory').doc(rideId);
@@ -1096,19 +2156,37 @@ class DatabaseService extends ChangeNotifier {
       final batch = _firestore.batch();
       final now = DateTime.now();
 
-      // Get the ride
-      final rideDoc = await _ridesCollection.doc(rideId).get();
-      if (!rideDoc.exists) throw Exception('Ride not found');
+      // Get the ride from requests collection first, then rides collection
+      DocumentSnapshot rideDoc = await _requestsCollection.doc(rideId).get();
+      bool isInRequests = rideDoc.exists;
+      
+      if (!isInRequests) {
+        rideDoc = await _ridesCollection.doc(rideId).get();
+        if (!rideDoc.exists) throw Exception('Ride not found');
+      }
 
       final rideData = rideDoc.data() as Map<String, dynamic>;
       final ride = RideModel.fromMap(rideData, rideId);
 
-      // Update the ride status
-      batch.update(_ridesCollection.doc(rideId), {
-        'status': RideStatus.cancelled.index,
-        'cancellationReason': reason,
-        'cancelledAt': now.millisecondsSinceEpoch,
-      });
+      // Update the ride status in the appropriate collection
+      if (isInRequests) {
+        // Move from requests to rides collection when cancelling
+        batch.set(_ridesCollection.doc(rideId), {
+          ...rideData,
+          'status': RideStatus.cancelled.index,
+          'cancellationReason': reason,
+          'cancelledAt': now.millisecondsSinceEpoch,
+        });
+        // Delete from requests collection
+        batch.delete(_requestsCollection.doc(rideId));
+      } else {
+        // Update in rides collection
+        batch.update(_ridesCollection.doc(rideId), {
+          'status': RideStatus.cancelled.index,
+          'cancellationReason': reason,
+          'cancelledAt': now.millisecondsSinceEpoch,
+        });
+      }
 
       // Add to driver's ride history
       final driverHistoryRef = _driversCollection.doc(driverId).collection('rideHistory').doc(rideId);
@@ -1171,6 +2249,8 @@ class DatabaseService extends ChangeNotifier {
   // Complete referral when driver is approved
   Future<void> completeReferral(String driverId) async {
     try {
+      print('🔄 Processing referral completion for driver: $driverId');
+      
       // Find the referral record for this driver
       final referralQuery = await _firestore
           .collection('referrals')
@@ -1189,12 +2269,31 @@ class DatabaseService extends ChangeNotifier {
         }
         
         final referrerId = referralData['referrerId'] as String;
+        final now = DateTime.now();
 
         // Update referral status to completed
         await referralDoc.reference.update({
           'status': 'completed',
           'completedAt': FieldValue.serverTimestamp(),
+          'completionDate': now.toIso8601String(), // Add explicit date string
         });
+
+        // Update referrer's stats
+        final referrerRef = _usersCollection.doc(referrerId);
+        final referrerDoc = await referrerRef.get();
+        
+        if (referrerDoc.exists) {
+          final referrerData = referrerDoc.data() as Map<String, dynamic>;
+          final currentReferrals = (referrerData['referrals'] ?? 0) as int;
+          final currentReferralAmount = (referrerData['referralAmount'] ?? 0.0) as double;
+          
+          await referrerRef.update({
+            'referrals': currentReferrals + 1,
+            'referralAmount': currentReferralAmount + 50.0,
+            'lastReferral': now.toIso8601String(),
+            'lastReferralDate': FieldValue.serverTimestamp(),
+          });
+        }
 
         // Send notification to referrer
         await sendNotification(
@@ -1205,13 +2304,17 @@ class DatabaseService extends ChangeNotifier {
           data: {
             'driverId': driverId,
             'amount': 50.0,
+            'completedAt': now.toIso8601String(),
           },
         );
 
-        print('Referral completed for driver: $driverId, referrer: $referrerId');
+        print('✅ Referral completed for driver: $driverId, referrer: $referrerId');
+      } else {
+        print('⚠️ No pending referral found for driver: $driverId');
       }
     } catch (e) {
-      print('Error completing referral: $e');
+      print('❌ Error completing referral: $e');
+      // Don't rethrow - referral completion shouldn't block driver approval
     }
   }
 
@@ -1360,4 +2463,146 @@ class DatabaseService extends ChangeNotifier {
       print('Error clearing driver signup progress: $e');
     }
   }
+
+  // --- NO CAR APPLICATIONS & VEHICLE OFFERS ---
+  Future<void> saveNoCarApplication(Map<String, dynamic> applicationData) async {
+    await _firestore.collection('no_car_applications').add(applicationData);
+  }
+
+  Future<void> saveVehicleOffer(Map<String, dynamic> vehicleData) async {
+    await _firestore.collection('vehicle_offers').add(vehicleData);
+  }
+
+  Future<List<Map<String, dynamic>>> getNoCarApplications() async {
+    final snapshot = await _firestore.collection('no_car_applications').get();
+    return snapshot.docs.map((doc) => doc.data()).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getVehicleOffers() async {
+    final snapshot = await _firestore.collection('vehicle_offers').where('isAvailable', isEqualTo: true).get();
+    return snapshot.docs.map((doc) => doc.data()).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getVehicleOffersByOwner(String ownerId) async {
+    final snapshot = await _firestore.collection('vehicle_offers').where('ownerId', isEqualTo: ownerId).get();
+    return snapshot.docs.map((doc) => doc.data()).toList();
+  }
+
+  // Mock data for testing
+  Future<List<Map<String, dynamic>>> getMockVehicleOffers() async {
+    return [
+      {
+        'ownerId': 'mock_owner_1',
+        'ownerName': 'Thabo Mokoena',
+        'ownerEmail': 'thabo.mokoena@email.com',
+        'ownerPhone': '+27 82 123 4567',
+        'vehicleMake': 'Toyota',
+        'vehicleModel': 'Corolla',
+        'vehicleYear': '2021',
+        'licensePlate': 'CA 123-456',
+        'vehicleType': 'Sedan',
+        'transmission': 'Automatic',
+        'fuelType': 'Petrol',
+        'vehicleCondition': 'Excellent condition, well maintained',
+        'dailyRate': 450.0,
+        'description': 'Reliable sedan perfect for daily driving. Clean interior and smooth ride.',
+        'features': ['Air Conditioning', 'Bluetooth', 'GPS Navigation', 'Backup Camera'],
+        'serviceAreas': ['Johannesburg CBD', 'Sandton', 'Rosebank'],
+        'status': 'active',
+        'isAvailable': true,
+        'rating': 4.8,
+        'totalRentals': 12,
+      },
+      {
+        'ownerId': 'mock_owner_2',
+        'ownerName': 'Nomsa Dlamini',
+        'ownerEmail': 'nomsa.dlamini@email.com',
+        'ownerPhone': '+27 83 987 6543',
+        'vehicleMake': 'BMW',
+        'vehicleModel': 'X3',
+        'vehicleYear': '2022',
+        'licensePlate': 'GP 789-012',
+        'vehicleType': 'SUV',
+        'transmission': 'Automatic',
+        'fuelType': 'Diesel',
+        'vehicleCondition': 'Premium condition, luxury features',
+        'dailyRate': 750.0,
+        'description': 'Luxury SUV with premium features. Perfect for business or leisure.',
+        'features': ['Leather Seats', 'Sunroof', 'Alloy Wheels', 'Tinted Windows', 'WiFi Hotspot'],
+        'serviceAreas': ['Sandton', 'Fourways', 'Midrand'],
+        'status': 'active',
+        'isAvailable': true,
+        'rating': 4.9,
+        'totalRentals': 8,
+      },
+      {
+        'ownerId': 'mock_owner_3',
+        'ownerName': 'Sipho Nkosi',
+        'ownerEmail': 'sipho.nkosi@email.com',
+        'ownerPhone': '+27 84 555 1234',
+        'vehicleMake': 'Honda',
+        'vehicleModel': 'Civic',
+        'vehicleYear': '2020',
+        'licensePlate': 'GP 456-789',
+        'vehicleType': 'Sedan',
+        'transmission': 'Manual',
+        'fuelType': 'Petrol',
+        'vehicleCondition': 'Good condition, fuel efficient',
+        'dailyRate': 350.0,
+        'description': 'Economical sedan with great fuel efficiency. Perfect for city driving.',
+        'features': ['Air Conditioning', 'Bluetooth'],
+        'serviceAreas': ['Johannesburg CBD', 'Braamfontein', 'Newtown'],
+        'status': 'active',
+        'isAvailable': true,
+        'rating': 4.5,
+        'totalRentals': 15,
+      },
+    ];
+  }
+
+  Future<List<Map<String, dynamic>>> getMockDriverApplications() async {
+    return [
+      {
+        'userId': 'mock_driver_1',
+        'name': 'Lerato Molefe',
+        'email': 'lerato.molefe@email.com',
+        'phoneNumber': '+27 81 234 5678',
+        'idNumber': '8901234567890',
+        'drivingExperience': '3-5 years',
+        'preferredAreas': ['Johannesburg CBD', 'Sandton', 'Rosebank'],
+        'preferences': ['Flexible hours', 'Luxury vehicles', 'Long distance trips'],
+        'availability': 'Weekdays 8 AM - 6 PM, Weekends flexible',
+        'status': 'pending',
+        'createdAt': DateTime.now().subtract(const Duration(days: 2)).toIso8601String(),
+      },
+      {
+        'userId': 'mock_driver_2',
+        'name': 'David van der Merwe',
+        'email': 'david.vandermerwe@email.com',
+        'phoneNumber': '+27 82 345 6789',
+        'idNumber': '9012345678901',
+        'drivingExperience': '5+ years',
+        'preferredAreas': ['Sandton', 'Fourways', 'Midrand'],
+        'preferences': ['Weekends only', 'SUV vehicles', 'Local trips only'],
+        'availability': 'Weekends only, flexible hours',
+        'status': 'pending',
+        'createdAt': DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
+      },
+      {
+        'userId': 'mock_driver_3',
+        'name': 'Zinhle Zulu',
+        'email': 'zinhle.zulu@email.com',
+        'phoneNumber': '+27 83 456 7890',
+        'idNumber': '9123456789012',
+        'drivingExperience': '1-3 years',
+        'preferredAreas': ['Johannesburg CBD', 'Braamfontein', 'Newtown'],
+        'preferences': ['Evening shifts', 'Economy vehicles'],
+        'availability': 'Evenings 6 PM - 12 AM, weekdays only',
+        'status': 'pending',
+        'createdAt': DateTime.now().toIso8601String(),
+      },
+    ];
+  }
+
+  // --- EXISTING METHODS ---
 }

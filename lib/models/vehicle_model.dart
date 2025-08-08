@@ -95,7 +95,7 @@ class VehicleModel {
         name: 'Sedan',
         type: VehicleType.sedan,
         priceMultiplier: 1.5,
-        capacity: 4,
+        capacity: 3,
         estimatedMinutes: 7,
       ),
       VehicleModel(
@@ -103,7 +103,7 @@ class VehicleModel {
         name: 'Large',
         type: VehicleType.large,
         priceMultiplier: 1.6,
-        capacity: 6,
+        capacity: 5,
         estimatedMinutes: 10,
       ),
     ];

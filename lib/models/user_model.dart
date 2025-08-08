@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class UserModel {
   final bool? isGirl;
   final bool? isStudent;
@@ -20,6 +22,10 @@ class UserModel {
   final int referrals;
   final double referralAmount;
   final DateTime? lastReferral;
+  // Role-specific fields
+  final String? userRole;
+  final bool isCarOwner;
+  final bool isDriverNoCar;
 
   UserModel({
     required this.uid,
@@ -42,18 +48,37 @@ class UserModel {
     this.referrals = 0,
     this.referralAmount = 0.0,
     this.lastReferral,
+    this.userRole,
+    this.isCarOwner = false,
+    this.isDriverNoCar = false,
   });
 
   factory UserModel.fromMap(Map<String, dynamic> data) {
     final bool? isGirl = data['isGirl'] is bool ? data['isGirl'] : null;
     final bool? isStudent = data['isStudent'] is bool ? data['isStudent'] : null;
+    
+    // Handle lastReferral field - could be Timestamp, String, or null
+    DateTime? lastReferral;
+    if (data['lastReferral'] != null) {
+      if (data['lastReferral'] is Timestamp) {
+        lastReferral = (data['lastReferral'] as Timestamp).toDate();
+      } else if (data['lastReferral'] is String) {
+        try {
+          lastReferral = DateTime.parse(data['lastReferral'] as String);
+        } catch (e) {
+          print('Warning: Could not parse lastReferral string: ${data['lastReferral']}');
+          lastReferral = null;
+        }
+      }
+    }
+    
     return UserModel(
       uid: data['uid'] ?? '',
       email: data['email'] ?? '',
       name: data['name'] ?? '',
       surname: data['surname'] ?? '',
       phoneNumber: data['phoneNumber'],
-      profileImage: data['profileImage'] ?? data['profileImageUrl'], // Support Firestore field 'profileImageUrl'
+      profileImage: data['profileImage'] ?? data['profileImageUrl'] ?? null, // Support both Firestore fields
       isDriver: data['isDriver'] ?? false,
       isApproved: data['isApproved'] ?? false,
       requiresDriverSignup: data['requiresDriverSignup'] ?? false,
@@ -65,7 +90,10 @@ class UserModel {
       missingProfileFields: List<String>.from(data['missingProfileFields'] ?? []),
       referrals: data['referrals'] ?? 0,
       referralAmount: (data['referralAmount'] ?? 0.0).toDouble(),
-      lastReferral: data['lastReferral'] != null ? DateTime.parse(data['lastReferral']) : null,
+      lastReferral: lastReferral,
+      userRole: data['userRole'],
+      isCarOwner: data['isCarOwner'] ?? false,
+      isDriverNoCar: data['isDriverNoCar'] ?? false,
     );
   }
 
@@ -91,6 +119,9 @@ class UserModel {
       'referrals': referrals,
       'referralAmount': referralAmount,
       'lastReferral': lastReferral?.toIso8601String(),
+      'userRole': userRole,
+      'isCarOwner': isCarOwner,
+      'isDriverNoCar': isDriverNoCar,
     };
   }
 
@@ -115,6 +146,9 @@ class UserModel {
     int? referrals,
     double? referralAmount,
     DateTime? lastReferral,
+    String? userRole,
+    bool? isCarOwner,
+    bool? isDriverNoCar,
   }) {
     return UserModel(
       uid: uid ?? this.uid,
@@ -137,6 +171,9 @@ class UserModel {
       referrals: referrals ?? this.referrals,
       referralAmount: referralAmount ?? this.referralAmount,
       lastReferral: lastReferral ?? this.lastReferral,
+      userRole: userRole ?? this.userRole,
+      isCarOwner: isCarOwner ?? this.isCarOwner,
+      isDriverNoCar: isDriverNoCar ?? this.isDriverNoCar,
     );
   }
 
