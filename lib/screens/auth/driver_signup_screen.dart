@@ -134,6 +134,8 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmPasswordController = TextEditingController();
   final TextEditingController _idNumberController = TextEditingController();
+  final TextEditingController _passportNumberController = TextEditingController();
+  final TextEditingController _trafficRegisterController = TextEditingController();
   final TextEditingController _vehicleModelController = TextEditingController();
   final TextEditingController _vehicleColorController = TextEditingController();
   final TextEditingController _licensePlateController = TextEditingController();
@@ -143,6 +145,7 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
       );
 
   String _selectedVehicleType = 'small';
+  String _idType = 'id'; // 'id' or 'passport'
   String? _selectedProvince;
   List<String> _towns = [];
   List<String> _selectedTowns = [];
@@ -221,6 +224,10 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
     'Driver Profile Image': null,
     'Driver Image Next to Vehicle': null,
     'Bank Statement': null,
+    // Additional keys for passport flow
+    'Passport': null,
+    'Work Permit': null,
+    'Proof of Residence': null,
   };
 
   // Track saved document paths for progress restoration
@@ -284,6 +291,8 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
     _phoneNumberController.addListener(_debouncedSaveProgress);
     _emailController.addListener(_debouncedSaveProgress);
     _idNumberController.addListener(_debouncedSaveProgress);
+    _passportNumberController.addListener(_debouncedSaveProgress);
+    _trafficRegisterController.addListener(_debouncedSaveProgress);
     _vehicleModelController.addListener(_debouncedSaveProgress);
     _vehicleColorController.addListener(_debouncedSaveProgress);
     _licensePlateController.addListener(_debouncedSaveProgress);
@@ -309,6 +318,9 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
             _vehicleColorController.text = savedProgress['vehicleColor'] ?? '';
             _licensePlateController.text = savedProgress['licensePlate'] ?? '';
             _referralCodeController.text = savedProgress['referralCode'] ?? '';
+            _idType = (savedProgress['idType'] ?? 'id') as String;
+            _passportNumberController.text = savedProgress['passportNumber'] ?? '';
+            _trafficRegisterController.text = savedProgress['trafficRegisterNumber'] ?? '';
             
             // Restore selections
             _selectedProvince = savedProgress['province'];
@@ -415,6 +427,9 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
           'vehicleColor': _vehicleColorController.text,
           'licensePlate': _licensePlateController.text,
           'referralCode': _referralCodeController.text,
+          'idType': _idType,
+          'passportNumber': _passportNumberController.text,
+          'trafficRegisterNumber': _trafficRegisterController.text,
           'province': _selectedProvince,
           'towns': _selectedTowns,
           'vehicleType': _selectedVehicleType,
@@ -804,6 +819,11 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
       final isLuxury = false;
       final isMax2 = _selectedPurposes.contains('1-2 seater');
 
+      // Resolve final model (use free text if Other)
+      final resolvedModel = _selectedModel == 'Other' && _vehicleModelController.text.trim().isNotEmpty
+          ? _vehicleModelController.text.trim()
+          : _selectedModel;
+
       // Create driver model
       final driverModel = DriverModel(
         userId: user.uid,
@@ -815,7 +835,7 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
         towns: _selectedTowns,
         documents: docUrls,
         vehicleType: _selectedVehicleType,
-        vehicleModel: _selectedModel,
+        vehicleModel: resolvedModel,
         vehicleColor: _selectedColor,
         licensePlate: _licensePlateController.text.trim(),
         isFemale: isFemale,
@@ -1086,19 +1106,71 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
 
 
 
-                    // ID Number (num keyboard)
-                    CustomTextField(
-                      controller: _idNumberController,
-                      label: 'ID Number',
-                      hintText: 'Enter your ID number',
-                      prefixIcon: Icons.badge,
-                      keyboardType: TextInputType.number,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) return 'Please enter your ID number';
-                        if (value.length != 13) return 'ID number must be 13 digits';
-                        return null;
-                      },
+                    // ID Type Toggle (ID vs Passport)
+                    const SizedBox(height: 8),
+                    const Text('Identification Type', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textDark)),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: RadioListTile<String>(
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            title: const Text('ID', style: TextStyle(fontSize: 14)),
+                            value: 'id',
+                            groupValue: _idType,
+                            onChanged: (v) => setState(() => _idType = v ?? 'id'),
+                          ),
+                        ),
+                        Expanded(
+                          child: RadioListTile<String>(
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            title: const Text('Passport', style: TextStyle(fontSize: 14)),
+                            value: 'passport',
+                            groupValue: _idType,
+                            onChanged: (v) => setState(() => _idType = v ?? 'passport'),
+                          ),
+                        ),
+                      ],
                     ),
+                    const SizedBox(height: 8),
+
+                    if (_idType == 'id') ...[
+                      // South African ID Number
+                      CustomTextField(
+                        controller: _idNumberController,
+                        label: 'ID Number',
+                        hintText: 'Enter your ID number',
+                        prefixIcon: Icons.badge,
+                        keyboardType: TextInputType.number,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) return 'Please enter your ID number';
+                          if (value.length != 13) return 'ID number must be 13 digits';
+                          return null;
+                        },
+                      ),
+                    ] else ...[
+                      // Passport Number (no strict rules)
+                      CustomTextField(
+                        controller: _passportNumberController,
+                        label: 'Passport Number',
+                        hintText: 'Enter your passport number',
+                        prefixIcon: Icons.badge_outlined,
+                        keyboardType: TextInputType.text,
+                        validator: (value) => null, // No strict validation for passport
+                      ),
+                      const SizedBox(height: 12),
+                      // Traffic Register Number (optional)
+                      CustomTextField(
+                        controller: _trafficRegisterController,
+                        label: 'Traffic Register Number (optional)',
+                        hintText: 'Enter traffic register number (if available)',
+                        prefixIcon: Icons.app_registration,
+                        keyboardType: TextInputType.text,
+                        validator: (value) => null, // No strict rules
+                      ),
+                    ],
 
                     // Vehicle Brand Dropdown
                     const Text('Vehicle Brand', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textDark)),
@@ -1124,7 +1196,10 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
                       DropdownButtonFormField<String>(
                         value: _selectedModel,
                         hint: const Text('Select model'),
-                        items: carModels[_selectedBrand]!.map((model) => DropdownMenuItem(value: model, child: Text(model))).toList(),
+                        items: [
+                          ...carModels[_selectedBrand]!.map((model) => DropdownMenuItem(value: model, child: Text(model))).toList(),
+                          const DropdownMenuItem(value: 'Other', child: Text('Other')),
+                        ],
                         onChanged: (String? model) {
                           setState(() {
                             _selectedModel = model;
@@ -1135,6 +1210,17 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
                         validator: (value) => value == null ? 'Please select a model' : null,
                       ),
                     const SizedBox(height: 16),
+
+                    // If Other selected, allow free-text model entry
+                    if (_selectedModel == 'Other')
+                      CustomTextField(
+                        controller: _vehicleModelController,
+                        label: 'Enter your vehicle model',
+                        hintText: 'e.g., Toyota Quantum (Custom)',
+                        prefixIcon: Icons.directions_car,
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Please enter your vehicle model' : null,
+                      ),
+                    if (_selectedModel == 'Other') const SizedBox(height: 16),
 
                     // Vehicle Color Dropdown
                     const Text('Vehicle Color', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textDark)),
@@ -1215,7 +1301,8 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
                     const Text('Please upload clear photos of the following documents', style: TextStyle(color: AppColors.textLight)),
                     const SizedBox(height: 16),
 
-                    // Document upload widgets
+                    // Document upload widgets (dynamic based on ID type)
+                    // Always required core documents from constants
                     ...AppConstants.requiredDriverDocuments.map((doc) => Padding(
                           padding: const EdgeInsets.only(bottom: 16),
                           child: DocumentUpload(
@@ -1224,10 +1311,32 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
                             onTap: () => _pickDocument(doc),
                           ),
                         )),
+                    // ID/Passport specific document
+                    if (_idType == 'id')
+                      DocumentUpload(
+                        title: 'ID Document',
+                        file: _documents['ID Document'],
+                        onTap: () => _pickDocument('ID Document'),
+                      )
+                    else ...[
+                      DocumentUpload(
+                        title: 'Passport',
+                        file: _documents['Passport'],
+                        onTap: () => _pickDocument('Passport'),
+                      ),
+                      const SizedBox(height: 12),
+                      DocumentUpload(
+                        title: 'Work Permit',
+                        file: _documents['Work Permit'],
+                        onTap: () => _pickDocument('Work Permit'),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    // Replace Bank Statement with Proof of Residence for all
                     DocumentUpload(
-                      title: 'Bank Statement',
-                      file: _documents['Bank Statement'],
-                      onTap: () => _pickDocument('Bank Statement'),
+                      title: 'Proof of Residence',
+                      file: _documents['Proof of Residence'],
+                      onTap: () => _pickDocument('Proof of Residence'),
                     ),
                     const SizedBox(height: 18),
                     const SizedBox(height: 24),
@@ -1513,6 +1622,11 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
         return;
       }
 
+      // Resolve final model (use free text if Other)
+      final resolvedModel2 = _selectedModel == 'Other' && _vehicleModelController.text.trim().isNotEmpty
+          ? _vehicleModelController.text.trim()
+          : _selectedModel;
+
       // Determine driver preferences based on selected purposes
       final isFemale = _selectedPurposes.contains('females');
       final isForStudents = _selectedPurposes.contains('students');
@@ -1530,7 +1644,7 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
         towns: _selectedTowns,
         documents: docUrls,
         vehicleType: _selectedVehicleType,
-        vehicleModel: _selectedModel,
+        vehicleModel: resolvedModel2, 
         vehicleColor: _selectedColor,
         licensePlate: _licensePlateController.text.trim(),
         isFemale: isFemale,

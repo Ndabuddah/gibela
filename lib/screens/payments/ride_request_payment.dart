@@ -51,11 +51,11 @@ class _RidePaymentScreenState extends State<RidePaymentScreen> with TickerProvid
     });
 
     try {
+      // Load secret key from dart-define to avoid hardcoding secrets in repo
+      const paystackKey = String.fromEnvironment('PAYSTACK_SECRET_KEY', defaultValue: '');
       await PaystackFlutter().pay(
         context: context,
-        // TODO: Inject Paystack secret key via secure runtime config (e.g., dart-define or remote config)
-        // DO NOT commit secrets to source control
-        secretKey: const String.fromEnvironment('PAYSTACK_SECRET_KEY', defaultValue: ''),
+        secretKey: paystackKey,
         amount: (widget.amount * 100).toDouble(),
         email: widget.email,
         callbackUrl: 'https://callback.com',

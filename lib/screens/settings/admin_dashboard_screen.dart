@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../constants/app_colors.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/common/modern_alert_dialog.dart';
+import '../../services/database_service.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -60,6 +61,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
       ),
       body: Column(
         children: [
+          // Promote driver signup progress to drivers
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: _PromoteProgressCard(),
+          ),
           // Search and Filter Bar
           Container(
             padding: const EdgeInsets.all(16),
@@ -133,6 +139,100 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PromoteProgressCard extends StatefulWidget {
+  @override
+  State<_PromoteProgressCard> createState() => _PromoteProgressCardState();
+}
+
+class _PromoteProgressCardState extends State<_PromoteProgressCard> {
+  final TextEditingController _uidController = TextEditingController();
+  bool _payLater = true;
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _uidController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Card(
+      color: AppColors.getCardColor(isDark),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.upgrade, color: Colors.purple),
+                const SizedBox(width: 8),
+                const Text('Promote Signup Progress → Drivers', style: TextStyle(fontWeight: FontWeight.w600)),
+                const Spacer(),
+                Switch(
+                  value: _payLater,
+                  onChanged: (v) => setState(() => _payLater = v),
+                  activeColor: Colors.purple,
+                ),
+                const SizedBox(width: 4),
+                Text('Pay Later', style: TextStyle(color: AppColors.getTextSecondaryColor(isDark))),
+              ],
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _uidController,
+              decoration: InputDecoration(
+                hintText: 'Enter user UID to promote',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                prefixIcon: const Icon(Icons.badge),
+                filled: true,
+                fillColor: AppColors.getBackgroundColor(isDark),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: ElevatedButton.icon(
+                onPressed: _busy ? null : () async {
+                  final uid = _uidController.text.trim();
+                  if (uid.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Please enter a UID')),
+                    );
+                    return;
+                  }
+                  setState(() => _busy = true);
+                  try {
+                    final ok = await Provider.of<DatabaseService>(context, listen: false)
+                        .promoteDriverSignupProgressToDriver(uid, payLater: _payLater);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(ok ? 'Promoted $uid' : 'Failed to promote $uid')),
+                    );
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error: $e')),
+                    );
+                  } finally {
+                    if (mounted) setState(() => _busy = false);
+                  }
+                },
+                icon: _busy 
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.playlist_add_check),
+                label: const Text('Promote'),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.purple, foregroundColor: Colors.white),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

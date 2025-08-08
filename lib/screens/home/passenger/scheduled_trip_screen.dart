@@ -20,6 +20,8 @@ import '../../../widgets/passenger/scheduled_location_selection.dart';
 import '../../../widgets/passenger/scheduled_trip_header.dart';
 import '../../../widgets/passenger/vehicle_selection.dart';
 import '../../payments/ride_request_payment.dart';
+import 'package:gibelbibela/screens/auth/female_verification_screen.dart';
+import 'package:gibelbibela/screens/auth/student_verification_screen.dart';
 
 class ScheduledTripScreen extends StatefulWidget {
   const ScheduledTripScreen({Key? key}) : super(key: key);
@@ -63,6 +65,9 @@ class _ScheduledTripScreenState extends State<ScheduledTripScreen> with TickerPr
   late Animation<double> _fadeAnimation;
   List<String> _pickupPredictions = [];
   List<String> _dropoffPredictions = [];
+
+  Set<String> _disabledVehicleTypes() => _cachedDisabledTypes ??= {};
+  Set<String>? _cachedDisabledTypes;
   int? _selectedPickupPrediction;
   int? _selectedDropoffPrediction;
 
@@ -127,7 +132,15 @@ class _ScheduledTripScreenState extends State<ScheduledTripScreen> with TickerPr
 
               // Location Selection
               if (_showLocationSelection)
-                ScheduledLocationSelection(pickupAddress: _pickupAddress, dropoffAddress: _dropoffAddress, onPickupChanged: (address) => setState(() => _pickupAddress = address), onDropoffChanged: (address) => setState(() => _dropoffAddress = address), onContinue: _proceedToVehicleSelection),
+                ScheduledLocationSelection(
+                  pickupAddress: _pickupAddress,
+                  dropoffAddress: _dropoffAddress,
+                  onPickupChanged: (address) => setState(() => _pickupAddress = address),
+                  onDropoffChanged: (address) => setState(() => _dropoffAddress = address),
+                  onPickupCoordinatesChanged: (coords) => setState(() => _pickupCoordinates = coords),
+                  onDropoffCoordinatesChanged: (coords) => setState(() => _dropoffCoordinates = coords),
+                  onContinue: _proceedToVehicleSelection,
+                ),
 
               // Vehicle Selection
               if (_showVehicleTypes)
@@ -138,7 +151,20 @@ class _ScheduledTripScreenState extends State<ScheduledTripScreen> with TickerPr
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: AppColors.getBorderColor(isDark)),
                   ),
-                  child: VehicleSelection(selectedType: _selectedVehicleType, onChanged: _selectVehicleType, distanceKm: _calculateDistance()),
+                  child: VehicleSelection(
+                    selectedType: _selectedVehicleType,
+                    onChanged: _selectVehicleType,
+                    distanceKm: _calculateDistance(),
+                    requestTime: DateTime(
+                      _selectedDate.year,
+                      _selectedDate.month,
+                      _selectedDate.day,
+                      _selectedTime.hour,
+                      _selectedTime.minute,
+                    ),
+                    disabledTypes: _disabledVehicleTypes(),
+                    onDisabledTap: _handleDisabledTypeTap,
+                  ),
                 ),
 
               // Confirmation
@@ -222,30 +248,85 @@ class _ScheduledTripScreenState extends State<ScheduledTripScreen> with TickerPr
         _showLocationSelection = false;
         _showVehicleTypes = true;
       });
+      _refreshDisabledTypes();
     } else {
       ModernSnackBar.show(context, message: 'Please select both pickup and dropoff locations');
     }
   }
 
+  Future<void> _refreshDisabledTypes() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final isGirl = userDoc.data()?['isGirl'] == true;
+      final isStudent = userDoc.data()?['isStudent'] == true;
+      final disabled = <String>{};
+      if (!isGirl) disabled.add('asambegirl');
+      if (!isStudent) disabled.add('asambestudent');
+      setState(() {
+        _cachedDisabledTypes = disabled;
+      });
+    } catch (e) {
+      // Ignore and keep defaults
+    }
+  }
+
+  Future<void> _handleDisabledTypeTap(String type) async {
+    if (type == 'asambegirl') {
+      final shouldVerify = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Female Verification Required'),
+          content: const Text('You need to verify as a female to use AsambeGirl rides.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+            ElevatedButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Verify')),
+          ],
+        ),
+      );
+      if (shouldVerify == true && mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const FemaleVerificationScreen()),
+        );
+      }
+    } else if (type == 'asambestudent') {
+      final shouldVerify = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Student Verification Required'),
+          content: const Text('You need to verify as a student to use AsambeStudent rides.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+            ElevatedButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Verify')),
+          ],
+        ),
+      );
+      if (shouldVerify == true && mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const StudentVerificationScreen()),
+        );
+      }
+    }
+  }
+
   void _selectVehicleType(String vehicleType) async {
-    // Calculate distance and get pricing info using the same logic as ride request screen
+    // Calculate distance and price at the scheduled time using PricingService
     final distance = _calculateDistance();
-    final scheduledDateTime = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, _selectedTime.hour, _selectedTime.minute);
-    
-    // Use the same pricing logic as ride request screen - calculate all fares and get the specific one
-    final allFares = PricingService.calculateAllFares(
+    final scheduledDateTime = DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day,
+      _selectedTime.hour,
+      _selectedTime.minute,
+    );
+
+    final double finalPrice = PricingService.calculateFare(
       distanceKm: distance,
+      vehicleType: vehicleType,
+      discountPercent: vehicleType == 'asambegirl' ? 30.0 : 0.0,
       requestTime: scheduledDateTime,
     );
-    
-    // Get the specific vehicle fare
-    final vehicleFare = allFares[vehicleType.toLowerCase()] ?? 50.0;
-    
-    // Apply discount for specific vehicles (same as ride request screen)
-    double finalPrice = vehicleFare;
-    if (vehicleType == 'asambegirl') {
-      finalPrice = vehicleFare * 0.7; // 30% discount
-    }
 
     setState(() {
       _selectedVehicleType = vehicleType;
@@ -275,24 +356,22 @@ class _ScheduledTripScreenState extends State<ScheduledTripScreen> with TickerPr
     setState(() => _isLoading = true);
 
     try {
-      // Calculate distance and pricing using the same logic as ride request screen
+      // Calculate distance and pricing exactly at the scheduled time
       final distance = _calculateDistance();
-      final scheduledDateTime = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, _selectedTime.hour, _selectedTime.minute);
-      
-      // Use the same pricing logic as ride request screen
-      final allFares = PricingService.calculateAllFares(
+      final scheduledDateTime = DateTime(
+        _selectedDate.year,
+        _selectedDate.month,
+        _selectedDate.day,
+        _selectedTime.hour,
+        _selectedTime.minute,
+      );
+
+      final double calculatedPrice = PricingService.calculateFare(
         distanceKm: distance,
+        vehicleType: _selectedVehicleType,
+        discountPercent: _selectedVehicleType == 'asambegirl' ? 30.0 : 0.0,
         requestTime: scheduledDateTime,
       );
-      
-      // Get the specific vehicle fare
-      final vehicleFare = allFares[_selectedVehicleType.toLowerCase()] ?? 50.0;
-      
-      // Apply discount for specific vehicles (same as ride request screen)
-      double calculatedPrice = vehicleFare;
-      if (_selectedVehicleType == 'asambegirl') {
-        calculatedPrice = vehicleFare * 0.7; // 30% discount
-      }
       
       final cancellationFee = _removeCancellationFee ? 0.0 : calculatedPrice * 0.15;
       final totalAmount = calculatedPrice + cancellationFee;
@@ -337,24 +416,22 @@ class _ScheduledTripScreenState extends State<ScheduledTripScreen> with TickerPr
     setState(() => _isLoading = true);
 
     try {
-      // Calculate distance and pricing using the same logic as ride request screen
+      // Calculate distance and pricing at the scheduled time using the unified pricing logic
       final distance = _calculateDistance();
-      final scheduledDateTime = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, _selectedTime.hour, _selectedTime.minute);
-      
-      // Use the same pricing logic as ride request screen
-      final allFares = PricingService.calculateAllFares(
+      final scheduledDateTime = DateTime(
+        _selectedDate.year,
+        _selectedDate.month,
+        _selectedDate.day,
+        _selectedTime.hour,
+        _selectedTime.minute,
+      );
+
+      final double calculatedPrice = PricingService.calculateFare(
         distanceKm: distance,
+        vehicleType: _selectedVehicleType,
+        discountPercent: _selectedVehicleType == 'asambegirl' ? 30.0 : 0.0,
         requestTime: scheduledDateTime,
       );
-      
-      // Get the specific vehicle fare
-      final vehicleFare = allFares[_selectedVehicleType.toLowerCase()] ?? 50.0;
-      
-      // Apply discount for specific vehicles (same as ride request screen)
-      double calculatedPrice = vehicleFare;
-      if (_selectedVehicleType == 'asambegirl') {
-        calculatedPrice = vehicleFare * 0.7; // 30% discount
-      }
       
       final cancellationFee = _removeCancellationFee ? 0.0 : calculatedPrice * 0.15;
       final totalAmount = calculatedPrice + cancellationFee;

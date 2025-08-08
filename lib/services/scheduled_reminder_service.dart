@@ -86,7 +86,7 @@ class ScheduledReminderService extends ChangeNotifier {
     try {
       // Get driver's accepted scheduled requests
       final scheduledQuery = await _firestore
-          .collection('scheduledRequests')
+          .collection('scheduled_bookings')
           .where('driverId', isEqualTo: driverId)
           .where('status', isEqualTo: 'accepted')
           .get();
@@ -115,7 +115,7 @@ class ScheduledReminderService extends ChangeNotifier {
     try {
       // Get passenger's scheduled requests
       final scheduledQuery = await _firestore
-          .collection('scheduledRequests')
+          .collection('scheduled_bookings')
           .where('userId', isEqualTo: passengerId)
           .where('status', whereIn: ['pending', 'accepted'])
           .get();
@@ -223,7 +223,7 @@ class ScheduledReminderService extends ChangeNotifier {
   Future<void> _loadDriverScheduledBookings(String driverId, DateTime now) async {
     try {
       final scheduledQuery = await _firestore
-          .collection('scheduledRequests')
+          .collection('scheduled_bookings')
           .where('driverId', isEqualTo: driverId)
           .where('status', isEqualTo: 'accepted')
           .get();
@@ -249,7 +249,7 @@ class ScheduledReminderService extends ChangeNotifier {
   Future<void> _loadPassengerScheduledBookings(String passengerId, DateTime now) async {
     try {
       final scheduledQuery = await _firestore
-          .collection('scheduledRequests')
+          .collection('scheduled_bookings')
           .where('userId', isEqualTo: passengerId)
           .where('status', whereIn: ['pending', 'accepted'])
           .get();

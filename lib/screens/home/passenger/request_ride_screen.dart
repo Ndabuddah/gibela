@@ -16,6 +16,7 @@ import 'package:gibelbibela/screens/auth/female_verification_screen.dart';
 import 'package:gibelbibela/screens/auth/student_verification_screen.dart'; // Added import for StudentVerificationScreen
 import 'package:gibelbibela/services/auth_service.dart';
 import 'package:gibelbibela/services/pricing_service.dart';
+import 'package:gibelbibela/widgets/passenger/vehicle_selection.dart';
 
 import '../../../constants/app_colors.dart';
 import '../../../models/user_model.dart';
@@ -341,6 +342,7 @@ class _RequestRideScreenState extends State<RequestRideScreen> with TickerProvid
         _showLocationSelection = false;
         _showVehicleTypes = true;
       });
+      _refreshDisabledTypesOnDemand();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select both pickup and dropoff locations')),
@@ -458,6 +460,73 @@ class _RequestRideScreenState extends State<RequestRideScreen> with TickerProvid
 
     // Show confirmation sheet
     _showConfirmationSheet();
+  }
+
+  // Build vehicle selection using unified widget gating
+  Widget _buildVehicleSelection() {
+    return VehicleSelection(
+      selectedType: _selectedVehicleType,
+      onChanged: _selectVehicleType,
+      distanceKm: _calculateDistance(),
+      requestTime: DateTime.now(),
+      disabledTypes: _disabledTypesOnDemand,
+      onDisabledTap: _handleDisabledTapOnDemand,
+    );
+  }
+
+  Set<String> _disabledTypesOnDemand = {};
+  Future<void> _refreshDisabledTypesOnDemand() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final isGirl = userDoc.data()?['isGirl'] == true;
+      final isStudent = userDoc.data()?['isStudent'] == true;
+      final disabled = <String>{};
+      if (!isGirl) disabled.add('asambegirl');
+      if (!isStudent) disabled.add('asambestudent');
+      setState(() {
+        _disabledTypesOnDemand = disabled;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _handleDisabledTapOnDemand(String type) async {
+    if (type == 'asambegirl') {
+      final shouldVerify = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Female Verification Required'),
+          content: const Text('You need to verify as a female to use AsambeGirl rides.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+            ElevatedButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Verify')),
+          ],
+        ),
+      );
+      if (shouldVerify == true && mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const FemaleVerificationScreen()),
+        );
+      }
+    } else if (type == 'asambestudent') {
+      final shouldVerify = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Student Verification Required'),
+          content: const Text('You need to verify as a student to use AsambeStudent rides.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+            ElevatedButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Verify')),
+          ],
+        ),
+      );
+      if (shouldVerify == true && mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const StudentVerificationScreen()),
+        );
+      }
+    }
   }
 
   void _confirmBooking() {

@@ -43,6 +43,9 @@ class _RideProgressScreenState extends State<RideProgressScreen>
   String _rideStatus = 'Finding driver...';
   String _driverName = '';
   String _driverRating = '';
+  String _driverPlate = '';
+  String _driverVehicle = '';
+  String _driverImageUrl = '';
   String _estimatedTime = '5-10 min';
   double _progress = 0.0;
   
@@ -189,6 +192,13 @@ class _RideProgressScreenState extends State<RideProgressScreen>
         setState(() {
           _driverName = driver.name;
           _driverRating = '${driver.averageRating.toStringAsFixed(1)} ★';
+          _driverPlate = driver.licensePlate ?? '';
+          final vehicleParts = [driver.vehicleModel, driver.vehicleColor]
+              .where((e) => (e ?? '').trim().isNotEmpty)
+              .map((e) => e!.trim())
+              .toList();
+          _driverVehicle = vehicleParts.isNotEmpty ? vehicleParts.join(' • ') : '';
+          _driverImageUrl = driver.profileImage ?? '';
         });
       }
     } catch (e) {
@@ -655,18 +665,13 @@ class _RideProgressScreenState extends State<RideProgressScreen>
                               if (_driverName.isNotEmpty) ...[
                                 Row(
                                   children: [
-                                    Container(
-                                      width: 50,
-                                      height: 50,
-                                      decoration: BoxDecoration(
-                                        color: AppColors.black.withOpacity(0.1),
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: const Icon(
-                                        Icons.person,
-                                        color: AppColors.black,
-                                        size: 30,
-                                      ),
+                                    CircleAvatar(
+                                      radius: 25,
+                                      backgroundColor: AppColors.black.withOpacity(0.1),
+                                      backgroundImage: _driverImageUrl.isNotEmpty ? NetworkImage(_driverImageUrl) : null,
+                                      child: _driverImageUrl.isEmpty
+                                          ? const Icon(Icons.person, color: AppColors.black, size: 30)
+                                          : null,
                                     ),
                                     const SizedBox(width: 16),
                                     Expanded(
@@ -682,13 +687,33 @@ class _RideProgressScreenState extends State<RideProgressScreen>
                                             ),
                                           ),
                                           const SizedBox(height: 4),
-                                          Text(
-                                            _driverRating,
-                                            style: TextStyle(
-                                              color: AppColors.black.withOpacity(0.7),
-                                              fontSize: 14,
+                                          if (_driverVehicle.isNotEmpty)
+                                            Text(
+                                              _driverVehicle,
+                                              style: TextStyle(
+                                                color: AppColors.black.withOpacity(0.8),
+                                                fontSize: 14,
+                                              ),
                                             ),
-                                          ),
+                                          if (_driverPlate.isNotEmpty) ...[
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              'Plate: $_driverPlate',
+                                              style: TextStyle(
+                                                color: AppColors.black.withOpacity(0.8),
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                          ],
+                                          const SizedBox(height: 4),
+                                          if (_driverRating.isNotEmpty)
+                                            Text(
+                                              _driverRating,
+                                              style: TextStyle(
+                                                color: AppColors.black.withOpacity(0.7),
+                                                fontSize: 13,
+                                              ),
+                                            ),
                                         ],
                                       ),
                                     ),

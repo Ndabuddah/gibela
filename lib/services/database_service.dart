@@ -2443,9 +2443,15 @@ class DatabaseService extends ChangeNotifier {
   // Get driver signup progress
   Future<Map<String, dynamic>?> getDriverSignupProgress(String userId) async {
     try {
+      // Primary collection name
       final doc = await _firestore.collection('driver_signup_progress').doc(userId).get();
       if (doc.exists) {
         return doc.data();
+      }
+      // Backward-compat: some environments used 'driver_progress'
+      final legacy = await _firestore.collection('driver_progress').doc(userId).get();
+      if (legacy.exists) {
+        return legacy.data();
       }
       return null;
     } catch (e) {
@@ -2457,8 +2463,17 @@ class DatabaseService extends ChangeNotifier {
   // Clear driver signup progress (called after successful submission)
   Future<void> clearDriverSignupProgress(String userId) async {
     try {
-      await _firestore.collection('driver_signup_progress').doc(userId).delete();
-      print('✅ Driver signup progress cleared for user: $userId');
+      final ref1 = _firestore.collection('driver_signup_progress').doc(userId);
+      final ref2 = _firestore.collection('driver_progress').doc(userId);
+      final d1 = await ref1.get();
+      if (d1.exists) {
+        await ref1.delete();
+      }
+      final d2 = await ref2.get();
+      if (d2.exists) {
+        await ref2.delete();
+      }
+      print('✅ Driver signup progress cleared for user: $userId (both collections if present)');
     } catch (e) {
       print('Error clearing driver signup progress: $e');
     }
@@ -2605,4 +2620,107 @@ class DatabaseService extends ChangeNotifier {
   }
 
   // --- EXISTING METHODS ---
+
+  // Promote a user's saved signup progress to a Driver profile
+  // ADMIN: Copies fields from driver_signup_progress/{uid} into drivers/{uid} directly
+  // Skips strict driver checks to ensure backfill always succeeds
+  Future<bool> promoteDriverSignupProgressToDriver(String userId, {bool payLater = false}) async {
+    try {
+      // Read saved progress
+      final progress = await getDriverSignupProgress(userId);
+      if (progress == null) {
+        print('⚠️ No signup progress found for $userId');
+        return false;
+      }
+
+      // Pull basics from progress
+      // Allow legacy/alternate field names
+      String name = (progress['name'] ?? progress['fullName'] ?? progress['driverName'] ?? '').toString();
+      String phoneNumber = (progress['phoneNumber'] ?? progress['phone'] ?? progress['mobile'] ?? '').toString();
+      String email = (progress['email'] ?? progress['mail'] ?? '').toString();
+      final idNumber = (progress['idNumber'] ?? progress['idNo'] ?? progress['nationalId'] ?? '').toString();
+      final province = progress['province'] as String?;
+      final towns = (progress['towns'] as List?)?.cast<String>() ?? <String>[];
+      final vehicleType = (progress['vehicleType'] ?? progress['carType']) as String?;
+      // Model can be from dropdown or free text
+      String? vehicleModel = (progress['vehicleModel'] ?? progress['carModel']) as String?;
+      if (vehicleModel == null || vehicleModel.trim().isEmpty) {
+        vehicleModel = (progress['vehicleModelText'] ?? progress['vehicleModel'])?.toString();
+      }
+      final vehicleColor = (progress['vehicleColor'] ?? progress['carColor']) as String?;
+      final licensePlate = (progress['licensePlate'] ?? progress['licensePlateNumber'] ?? progress['plate'] ?? progress['rego']) as String?;
+      final purposes = (progress['purposes'] as List?)?.cast<String>() ?? <String>[];
+      final profileImage = (progress['profileImage'] ?? progress['driverProfileImage'])?.toString();
+
+      // Enrich with users/{uid} if available
+      try {
+        final userDoc = await _usersCollection.doc(userId).get();
+        if (userDoc.exists) {
+          final data = userDoc.data() as Map<String, dynamic>;
+          if (name.trim().isEmpty) name = (data['name'] ?? '').toString();
+          if (phoneNumber.trim().isEmpty) phoneNumber = (data['phoneNumber'] ?? '').toString();
+          if (email.trim().isEmpty) email = (data['email'] ?? '').toString();
+        }
+      } catch (_) {}
+
+      // Map purposes to flags
+      final isFemale = purposes.contains('females');
+      final isForStudents = purposes.contains('students');
+      final isLuxury = purposes.contains('luxury');
+      final isMax2 = purposes.contains('1-2 seater');
+
+      // Build a driver document aligned with DriverModel.toMap
+      final Map<String, dynamic> driverData = {
+        'userId': userId,
+        'idNumber': idNumber,
+        'name': name,
+        'phoneNumber': phoneNumber,
+        'email': email,
+        'province': province,
+        'towns': towns,
+        'documents': <String, String>{},
+        'vehicleType': vehicleType,
+        'vehicleModel': vehicleModel,
+        'vehicleColor': vehicleColor,
+        'licensePlate': licensePlate,
+        'status': DriverStatus.offline.index,
+        'averageRating': 0.0,
+        'totalRides': 0,
+        'totalEarnings': 0,
+        'isApproved': false,
+        'profileImage': profileImage,
+        'IsFemale': isFemale,
+        'IsForStudents': isForStudents,
+        'isLuxury': isLuxury,
+        'isMax2': isMax2,
+        'vehiclePurposes': purposes,
+        'payLater': payLater,
+        'paymentModel': PaymentModel.weekly.index,
+        'isPaid': false,
+        'lastPaymentModelChange': null,
+        'documentVerificationStatus': <String, bool>{},
+        'documentExpiryDates': <String, String>{},
+        'vehicleInformation': <String, dynamic>{},
+        'serviceAreaPreferences': <String, List<String>>{},
+        'workingHours': <String, List<String>>{},
+        'driverPreferences': <String, dynamic>{},
+        'profileCompletionPercentage': 0.0,
+      };
+
+      // Write into drivers collection directly, merging with any existing doc
+      await _driversCollection.doc(userId).set(driverData, SetOptions(merge: true));
+
+      // Ensure users/{uid}.isDriver = true to avoid access checks elsewhere
+      await _usersCollection.doc(userId).set({'isDriver': true}, SetOptions(merge: true));
+
+      // Clear progress
+      await clearDriverSignupProgress(userId);
+
+      print('✅ Promoted signup progress to drivers/{userId} (direct copy) for $userId');
+      return true;
+    } catch (e) {
+      print('❌ Error promoting signup progress for $userId: $e');
+      return false;
+    }
+  }
 }

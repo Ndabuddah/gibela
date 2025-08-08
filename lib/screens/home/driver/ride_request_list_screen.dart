@@ -44,6 +44,8 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
     super.initState();
     _loadLocation();
     _loadCurrentDriver();
+    // Proactively clean up abandoned (stale) pending requests so drivers don't see them
+    DatabaseService().cleanupAbandonedRequests();
     // Refresh location every 30 seconds to ensure accurate filtering
     Timer.periodic(const Duration(seconds: 30), (timer) {
       if (mounted) {

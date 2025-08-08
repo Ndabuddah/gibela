@@ -12,6 +12,8 @@ class ScheduledLocationSelection extends StatefulWidget {
   final Function(String) onPickupChanged;
   final Function(String) onDropoffChanged;
   final VoidCallback onContinue;
+  final void Function(List<double> coords)? onPickupCoordinatesChanged;
+  final void Function(List<double> coords)? onDropoffCoordinatesChanged;
 
   const ScheduledLocationSelection({
     Key? key,
@@ -20,6 +22,8 @@ class ScheduledLocationSelection extends StatefulWidget {
     required this.onPickupChanged,
     required this.onDropoffChanged,
     required this.onContinue,
+    this.onPickupCoordinatesChanged,
+    this.onDropoffCoordinatesChanged,
   }) : super(key: key);
 
   @override
@@ -97,21 +101,24 @@ class _ScheduledLocationSelectionState extends State<ScheduledLocationSelection>
           const SizedBox(height: 20),
           
           // Continue Button
-          ElevatedButton(
-            onPressed: widget.onContinue,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: widget.onContinue,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
-            ),
-            child: const Text(
-              'Continue',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
+              child: const Text(
+                'Continue',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ),
@@ -275,7 +282,7 @@ class _ScheduledLocationSelectionState extends State<ScheduledLocationSelection>
     try {
       final locations = await locationFromAddress(prediction);
       if (locations.isNotEmpty) {
-        // You can add coordinate handling here if needed
+        widget.onPickupCoordinatesChanged?.call([locations.first.latitude, locations.first.longitude]);
       }
     } catch (e) {
       // Optionally show error
@@ -293,7 +300,7 @@ class _ScheduledLocationSelectionState extends State<ScheduledLocationSelection>
     try {
       final locations = await locationFromAddress(prediction);
       if (locations.isNotEmpty) {
-        // You can add coordinate handling here if needed
+        widget.onDropoffCoordinatesChanged?.call([locations.first.latitude, locations.first.longitude]);
       }
     } catch (e) {
       // Optionally show error

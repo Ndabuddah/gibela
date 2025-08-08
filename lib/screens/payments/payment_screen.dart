@@ -71,11 +71,11 @@ class _PaymentScreenState extends State<PaymentScreen> with TickerProviderStateM
     try {
       print('💳 Starting payment process for amount: R${widget.amount}');
       
+      // Load secret key from dart-define to avoid committing secrets
+      const paystackKey = String.fromEnvironment('PAYSTACK_SECRET_KEY', defaultValue: '');
       await PaystackFlutter().pay(
         context: context,
-        // TODO: Inject Paystack secret key via secure runtime config (e.g., dart-define or remote config)
-        // DO NOT commit secrets to source control
-        secretKey: const String.fromEnvironment('PAYSTACK_SECRET_KEY', defaultValue: ''),
+        secretKey: paystackKey,
         amount: (widget.amount * 100).toDouble(),
         email: widget.email,
         callbackUrl: 'https://callback.com',

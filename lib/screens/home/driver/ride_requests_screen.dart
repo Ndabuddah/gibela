@@ -150,6 +150,7 @@ class _RideRequestBody extends StatelessWidget {
               selectedType: provider.vehicleType,
               onChanged: provider.setVehicleType,
               distanceKm: provider.distanceKm,
+              // For drivers' own request UI, no gating needed
             ),
             const SizedBox(height: 32),
             // Distance

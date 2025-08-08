@@ -46,6 +46,7 @@ class _ScheduledConfirmationState extends State<ScheduledConfirmation> {
     final calculatedPrice = PricingService.calculateFare(
       distanceKm: widget.distanceKm,
       vehicleType: widget.selectedVehicleType,
+      discountPercent: widget.selectedVehicleType == 'asambegirl' ? 30.0 : 0.0,
       requestTime: DateTime(widget.selectedDate.year, widget.selectedDate.month, widget.selectedDate.day, widget.selectedTime.hour, widget.selectedTime.minute),
     );
     
