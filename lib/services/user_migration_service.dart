@@ -100,15 +100,8 @@ class UserMigrationService {
         };
       }
 
-      // Check payment status
+      // Check driver access status (no payment required)
       final accessCheck = await _driverAccessService.checkDriverAccess(userId);
-      if (accessCheck['status'] == 'payment_required') {
-        return {
-          'needsAction': true,
-          'action': 'payment',
-          'reason': 'Payment required'
-        };
-      }
 
       return {
         'needsAction': false,

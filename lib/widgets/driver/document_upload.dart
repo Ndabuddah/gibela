@@ -23,7 +23,7 @@ class DocumentUpload extends StatelessWidget {
       children: [
         Text(
           title,
-          style: const TextStyle(
+          style: TextStyle(
             fontWeight: FontWeight.w500,
             color: AppColors.textDark,
           ),
@@ -88,7 +88,7 @@ class DocumentUpload extends StatelessWidget {
                 : Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.upload_file,
                         color: AppColors.textLight,
                         size: 36,
@@ -96,12 +96,12 @@ class DocumentUpload extends StatelessWidget {
                       const SizedBox(height: 8),
                       Text(
                         'Upload $title',
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppColors.textLight,
                         ),
                       ),
                       const SizedBox(height: 4),
-                      const Text(
+                      Text(
                         'Tap to select file',
                         style: TextStyle(
                           color: AppColors.textMuted,

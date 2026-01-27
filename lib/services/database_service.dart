@@ -521,32 +521,129 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  // Clean up abandoned requests (requests older than 30 minutes)
-  Future<void> cleanupAbandonedRequests() async {
+  // Check and handle request timeouts (15 minutes for regular, 30 minutes for scheduled)
+  Future<void> checkAndHandleRequestTimeouts() async {
     try {
-      final thirtyMinutesAgo = DateTime.now().subtract(const Duration(minutes: 30));
+      final now = DateTime.now();
+      final fifteenMinutesAgo = now.subtract(const Duration(minutes: 15));
+      final thirtyMinutesAgo = now.subtract(const Duration(minutes: 30));
       
-      final QuerySnapshot snapshot = await _requestsCollection
+      // Check regular requests (15 minute timeout)
+      final regularRequestsSnapshot = await _requestsCollection
+          .where('status', isEqualTo: 'pending')
+          .where('createdAt', isLessThan: Timestamp.fromDate(fifteenMinutesAgo))
+          .get();
+      
+      // Check scheduled requests (30 minute timeout)
+      final scheduledRequestsSnapshot = await _scheduledRequestsCollection
           .where('status', isEqualTo: 'pending')
           .where('createdAt', isLessThan: Timestamp.fromDate(thirtyMinutesAgo))
           .get();
       
-      if (snapshot.docs.isNotEmpty) {
-        final batch = _firestore.batch();
-        for (final doc in snapshot.docs) {
-          batch.update(doc.reference, {
-            'status': 'cancelled',
-            'cancelledAt': FieldValue.serverTimestamp(),
-            'cancellationReason': 'Request abandoned (timeout)',
+      final batch = _firestore.batch();
+      int timeoutCount = 0;
+      
+      // Handle regular request timeouts
+      for (final doc in regularRequestsSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final passengerId = data['userId'] as String?;
+        final paymentType = data['paymentType'] as String? ?? 'Cash';
+        final paymentStatus = data['paymentStatus'] as String? ?? 'pending';
+        
+        // Cancel the request
+        batch.update(doc.reference, {
+          'status': 'cancelled',
+          'cancelledAt': FieldValue.serverTimestamp(),
+          'cancellationReason': 'Request timed out - no driver available',
+        });
+        
+        // Create notification for passenger
+        if (passengerId != null) {
+          final notificationRef = _notificationsCollection.doc();
+          batch.set(notificationRef, {
+            'userId': passengerId,
+            'title': 'Ride Request Timed Out',
+            'body': 'Your ride request timed out after 15 minutes. No driver was available. Please try again.',
+            'timestamp': FieldValue.serverTimestamp(),
+            'isRead': false,
+            'type': 'ride_timeout',
+            'data': {'rideId': doc.id},
           });
+          
+          // Process refund if card payment was made
+          if (paymentType.toLowerCase() == 'card' && paymentStatus == 'paid') {
+            // Mark for refund processing
+            batch.set(_firestore.collection('refund_requests').doc(), {
+              'rideId': doc.id,
+              'userId': passengerId,
+              'amount': data['estimatedFare'] ?? 0.0,
+              'reason': 'Request timeout',
+              'status': 'pending',
+              'createdAt': FieldValue.serverTimestamp(),
+            });
+          }
         }
         
+        timeoutCount++;
+      }
+      
+      // Handle scheduled request timeouts
+      for (final doc in scheduledRequestsSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final passengerId = data['userId'] as String?;
+        final paymentType = data['paymentType'] as String? ?? 'Cash';
+        final paymentStatus = data['paymentStatus'] as String? ?? 'pending';
+        
+        // Cancel the scheduled request
+        batch.update(doc.reference, {
+          'status': 'cancelled',
+          'cancelledAt': FieldValue.serverTimestamp(),
+          'cancellationReason': 'Scheduled request timed out - no driver available',
+        });
+        
+        // Create notification for passenger
+        if (passengerId != null) {
+          final notificationRef = _notificationsCollection.doc();
+          batch.set(notificationRef, {
+            'userId': passengerId,
+            'title': 'Scheduled Ride Timed Out',
+            'body': 'Your scheduled ride request timed out after 30 minutes. No driver was available. Please try again.',
+            'timestamp': FieldValue.serverTimestamp(),
+            'isRead': false,
+            'type': 'ride_timeout',
+            'data': {'requestId': doc.id},
+          });
+          
+          // Process refund if card payment was made
+          if (paymentType.toLowerCase() == 'card' && paymentStatus == 'paid') {
+            // Mark for refund processing
+            batch.set(_firestore.collection('refund_requests').doc(), {
+              'requestId': doc.id,
+              'userId': passengerId,
+              'amount': data['estimatedFare'] ?? 0.0,
+              'reason': 'Scheduled request timeout',
+              'status': 'pending',
+              'createdAt': FieldValue.serverTimestamp(),
+            });
+          }
+        }
+        
+        timeoutCount++;
+      }
+      
+      if (timeoutCount > 0) {
         await batch.commit();
-        print('✅ Cleaned up ${snapshot.docs.length} abandoned requests');
+        print('✅ Handled $timeoutCount timed out requests with notifications and refunds');
       }
     } catch (e) {
-      print('Error cleaning up abandoned requests: $e');
+      print('Error checking request timeouts: $e');
     }
+  }
+
+  // Clean up abandoned requests (legacy method - now uses checkAndHandleRequestTimeouts)
+  Future<void> cleanupAbandonedRequests() async {
+    // Delegate to the new timeout handling method
+    await checkAndHandleRequestTimeouts();
   }
 
   // Create a new ride request
@@ -635,7 +732,91 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  // Helper method to convert RideStatus enum to string
+  // Transaction-safe ride acceptance - prevents race conditions
+  Future<bool> acceptRideRequestTransaction(String rideId, String driverId) async {
+    try {
+      return await _firestore.runTransaction<bool>((transaction) async {
+        // Check in requests collection first
+        final requestRef = _requestsCollection.doc(rideId);
+        final requestDoc = await transaction.get(requestRef);
+        
+        DocumentReference? rideRef;
+        Map<String, dynamic>? rideData;
+        bool isInRequests = false;
+        
+        if (requestDoc.exists) {
+          isInRequests = true;
+          rideRef = requestRef;
+          rideData = requestDoc.data() as Map<String, dynamic>;
+        } else {
+          // Check in rides collection
+          final rideDocRef = _ridesCollection.doc(rideId);
+          final rideDoc = await transaction.get(rideDocRef);
+          if (rideDoc.exists) {
+            rideRef = rideDocRef;
+            rideData = rideDoc.data() as Map<String, dynamic>;
+          } else {
+            throw Exception('Ride not found');
+          }
+        }
+        
+        // Check if ride is still available (atomic check)
+        final currentStatus = rideData!['status'];
+        final currentDriverId = rideData['driverId'];
+        
+        // Convert string status to enum for comparison
+        final isRequested = currentStatus == 'pending' || 
+                          currentStatus == RideStatus.requested.index;
+        
+        if (!isRequested) {
+          throw Exception('Ride is no longer available for acceptance');
+        }
+        
+        if (currentDriverId != null && currentDriverId.toString().isNotEmpty) {
+          throw Exception('Ride has already been accepted by another driver');
+        }
+        
+        // Check if driver has an active ride
+        final driverRef = _driversCollection.doc(driverId);
+        final driverDoc = await transaction.get(driverRef);
+        if (driverDoc.exists) {
+          final driverData = driverDoc.data() as Map<String, dynamic>;
+          final driverStatus = driverData['status'];
+          if (driverStatus == DriverStatus.onRide.index) {
+            throw Exception('You are already on an active ride. Please complete it first.');
+          }
+        }
+        
+        // Atomically update the ride
+        if (isInRequests) {
+          transaction.update(requestRef, {
+            'driverId': driverId,
+            'status': 'accepted',
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        } else {
+          transaction.update(rideRef!, {
+            'driverId': driverId,
+            'status': RideStatus.accepted.index,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+        
+        // Update driver status
+        transaction.update(driverRef, {
+          'status': DriverStatus.onRide.index,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        
+        return true;
+      });
+    } catch (e) {
+      print('❌ Transaction error in acceptRideRequestTransaction: $e');
+      rethrow;
+    }
+  }
+
+  // Helper method to convert RideStatus enum to string (for requests collection)
   String _convertStatusToString(RideStatus status) {
     switch (status) {
       case RideStatus.requested:
@@ -651,6 +832,36 @@ class DatabaseService extends ChangeNotifier {
       case RideStatus.cancelled:
         return 'cancelled';
     }
+  }
+
+  // Helper method to convert string status to RideStatus enum
+  RideStatus _convertStringToStatus(String status) {
+    switch (status.toLowerCase()) {
+      case 'pending':
+        return RideStatus.requested;
+      case 'accepted':
+        return RideStatus.accepted;
+      case 'driver_arrived':
+        return RideStatus.driverArrived;
+      case 'in_progress':
+        return RideStatus.inProgress;
+      case 'completed':
+        return RideStatus.completed;
+      case 'cancelled':
+        return RideStatus.cancelled;
+      default:
+        return RideStatus.requested;
+    }
+  }
+
+  // Helper method to check if status matches (handles both string and enum formats)
+  bool _statusMatches(dynamic status, RideStatus expectedStatus) {
+    if (status is String) {
+      return _convertStringToStatus(status) == expectedStatus;
+    } else if (status is int) {
+      return RideStatus.values[status] == expectedStatus;
+    }
+    return false;
   }
 
   // ========== SCHEDULED REQUEST METHODS ==========
@@ -1576,6 +1787,23 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
+  // Update driver's current location in Firestore
+  Future<void> updateDriverLocation(String driverId, double latitude, double longitude) async {
+    try {
+      await _driversCollection.doc(driverId).update({
+        'currentLocation': {
+          'latitude': latitude,
+          'longitude': longitude,
+          'timestamp': FieldValue.serverTimestamp(),
+        },
+        'lastLocationUpdate': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Error updating driver location: $e');
+      rethrow;
+    }
+  }
+
   // Get today's earnings and ride count for a driver
   Future<Map<String, dynamic>> getTodaysEarningsAndRides(String driverId) async {
     final now = DateTime.now();
@@ -1776,14 +2004,14 @@ class DatabaseService extends ChangeNotifier {
             }
             
             return {
-              'fare': (data['actualFare'] ?? data['estimatedFare'] ?? 0).toDouble(),
+              'fare': ((data['actualFare'] ?? data['estimatedFare'] ?? 0) as num).toDouble(),
               'date': timestamp,
-              'status': data['status'],
+              'status': (data['status'] as num?)?.toInt() ?? RideStatus.accepted.index,
               'id': doc.id,
               'pickupAddress': data['pickupAddress'] ?? 'Unknown Pickup',
               'destinationAddress': data['dropoffAddress'] ?? 'Unknown Destination',
               'passengerId': data['passengerId'] ?? '',
-              'earnings': data['earnings'] ?? 0.0,
+              'earnings': ((data['earnings'] ?? 0) as num).toDouble(),
             };
           })
           .whereType<Map<String, dynamic>>()
@@ -1868,7 +2096,7 @@ class DatabaseService extends ChangeNotifier {
         allRides.add({
           'fare': (data['actualFare'] ?? data['estimatedFare'] ?? 0).toDouble(),
           'date': data['timestamp']?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch,
-          'status': _convertStringToStatus(data['status']),
+          'status': _convertStringToStatusIndex(data['status']),
           'id': doc.id,
           'pickupAddress': data['pickupAddress'] ?? 'Unknown Pickup',
           'destinationAddress': data['dropoffAddress'] ?? 'Unknown Destination',
@@ -1900,8 +2128,8 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  // Helper method to convert string status to RideStatus index
-  int _convertStringToStatus(String status) {
+  // Helper method to convert string status to RideStatus index (for Firestore)
+  int _convertStringToStatusIndex(String status) {
     switch (status) {
       case 'pending':
         return RideStatus.requested.index;
@@ -2068,159 +2296,212 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  // Complete a ride and update earnings
+  // Complete a ride and update earnings (transaction-safe)
   Future<void> completeRide(String rideId, String driverId, double actualFare) async {
     try {
-      final batch = _firestore.batch();
-      final now = DateTime.now();
+      await _firestore.runTransaction((transaction) async {
+        final now = DateTime.now();
 
-      // Get the ride from requests collection first, then rides collection
-      DocumentSnapshot rideDoc = await _requestsCollection.doc(rideId).get();
-      bool isInRequests = rideDoc.exists;
-      
-      if (!isInRequests) {
-        rideDoc = await _ridesCollection.doc(rideId).get();
-        if (!rideDoc.exists) throw Exception('Ride not found');
-      }
+        // Get the ride from requests collection first, then rides collection
+        DocumentReference? rideRef;
+        DocumentSnapshot rideDoc;
+        bool isInRequests = false;
+        
+        final requestRef = _requestsCollection.doc(rideId);
+        rideDoc = await transaction.get(requestRef);
+        
+        if (rideDoc.exists) {
+          isInRequests = true;
+          rideRef = requestRef;
+        } else {
+          final rideDocRef = _ridesCollection.doc(rideId);
+          rideDoc = await transaction.get(rideDocRef);
+          if (!rideDoc.exists) throw Exception('Ride not found');
+          rideRef = rideDocRef;
+        }
 
-      final rideData = rideDoc.data() as Map<String, dynamic>;
-      final ride = RideModel.fromMap(rideData, rideId);
+        final rideData = rideDoc.data() as Map<String, dynamic>;
+        final ride = RideModel.fromMap(rideData, rideId);
+        
+        // Verify ride is in progress
+        final currentStatus = rideData['status'];
+        final isInProgress = _statusMatches(currentStatus, RideStatus.inProgress) ||
+                            (currentStatus is String && currentStatus == 'in_progress');
+        
+        if (!isInProgress) {
+          throw Exception('Ride is not in progress. Current status: $currentStatus');
+        }
 
-      // Update the ride status in the appropriate collection
-      if (isInRequests) {
-        // Move from requests to rides collection when completing
-        batch.set(_ridesCollection.doc(rideId), {
-          ...rideData,
-          'status': RideStatus.completed.index,
+        // Update the ride status in the appropriate collection
+        if (isInRequests) {
+          // Move from requests to rides collection when completing
+          transaction.set(_ridesCollection.doc(rideId), {
+            ...rideData,
+            'status': RideStatus.completed.index,
+            'actualFare': actualFare,
+            'dropoffTime': now.millisecondsSinceEpoch,
+          });
+          // Delete from requests collection
+          transaction.delete(requestRef);
+        } else {
+          // Update in rides collection
+          transaction.update(rideRef!, {
+            'status': RideStatus.completed.index,
+            'actualFare': actualFare,
+            'dropoffTime': now.millisecondsSinceEpoch,
+          });
+        }
+
+        // Add to driver's ride history with earnings
+        final driverHistoryRef = _driversCollection.doc(driverId).collection('rideHistory').doc(rideId);
+        transaction.set(driverHistoryRef, {
+          'rideId': rideId,
+          'passengerId': ride.passengerId,
+          'pickupAddress': ride.pickupAddress,
+          'dropoffAddress': ride.dropoffAddress,
+          'estimatedFare': ride.estimatedFare,
           'actualFare': actualFare,
-          'dropoffTime': now.millisecondsSinceEpoch,
-        });
-        // Delete from requests collection
-        batch.delete(_requestsCollection.doc(rideId));
-      } else {
-        // Update in rides collection
-        batch.update(_ridesCollection.doc(rideId), {
           'status': RideStatus.completed.index,
-          'actualFare': actualFare,
+          'requestTime': ride.requestTime.millisecondsSinceEpoch,
           'dropoffTime': now.millisecondsSinceEpoch,
+          'earnings': actualFare, // Track earnings
+          'completedAt': now.millisecondsSinceEpoch,
         });
-      }
 
-      // Add to driver's ride history with earnings
-      final driverHistoryRef = _driversCollection.doc(driverId).collection('rideHistory').doc(rideId);
-      batch.set(driverHistoryRef, {
-        'rideId': rideId,
-        'passengerId': ride.passengerId,
-        'pickupAddress': ride.pickupAddress,
-        'dropoffAddress': ride.dropoffAddress,
-        'estimatedFare': ride.estimatedFare,
-        'actualFare': actualFare,
-        'status': RideStatus.completed.index,
-        'requestTime': ride.requestTime.millisecondsSinceEpoch,
-        'dropoffTime': now.millisecondsSinceEpoch,
-        'earnings': actualFare, // Track earnings
-        'completedAt': now.millisecondsSinceEpoch,
+        // Update driver's total earnings and reset payment status
+        final driverRef = _driversCollection.doc(driverId);
+        transaction.update(driverRef, {
+          'totalEarnings': FieldValue.increment(actualFare),
+          'totalRides': FieldValue.increment(1),
+          'status': DriverStatus.online.index, // Set driver back to online
+          'isPaid': false, // Reset payment status when new earnings are added
+        });
+
+        // Create notification for passenger
+        final notificationRef = _notificationsCollection.doc();
+        transaction.set(notificationRef, {
+          'userId': ride.passengerId,
+          'title': 'Ride Completed',
+          'body': 'Your ride has been completed. Please rate your driver.',
+          'timestamp': now,
+          'isRead': false,
+          'type': 'ride_completed',
+          'data': {'rideId': rideId},
+        });
       });
-
-      // Update driver's total earnings and reset payment status
-      final driverRef = _driversCollection.doc(driverId);
-      batch.update(driverRef, {
-        'totalEarnings': FieldValue.increment(actualFare),
-        'totalRides': FieldValue.increment(1),
-        'status': DriverStatus.online.index, // Set driver back to online
-        'isPaid': false, // Reset payment status when new earnings are added
-      });
-
-      // Create notification for passenger
-      final notificationRef = _notificationsCollection.doc();
-      batch.set(notificationRef, {
-        'userId': ride.passengerId,
-        'title': 'Ride Completed',
-        'body': 'Your ride has been completed. Please rate your driver.',
-        'timestamp': now,
-        'isRead': false,
-        'type': 'ride_completed',
-        'data': {'rideId': rideId},
-      });
-
-      await batch.commit();
     } catch (e) {
       print('Error completing ride: $e');
       rethrow;
     }
   }
 
-  // Cancel a ride and update earnings (subtract if driver cancelled)
+  // Cancel a ride and update earnings (subtract if driver cancelled) - Transaction-safe
   Future<void> cancelRideAndUpdateEarnings(String rideId, String driverId, {String? reason, bool isDriverCancellation = false}) async {
     try {
-      final batch = _firestore.batch();
-      final now = DateTime.now();
+      await _firestore.runTransaction((transaction) async {
+        final now = DateTime.now();
 
-      // Get the ride from requests collection first, then rides collection
-      DocumentSnapshot rideDoc = await _requestsCollection.doc(rideId).get();
-      bool isInRequests = rideDoc.exists;
-      
-      if (!isInRequests) {
-        rideDoc = await _ridesCollection.doc(rideId).get();
-        if (!rideDoc.exists) throw Exception('Ride not found');
-      }
+        // Get the ride from requests collection first, then rides collection
+        DocumentReference? rideRef;
+        DocumentSnapshot rideDoc;
+        bool isInRequests = false;
+        
+        final requestRef = _requestsCollection.doc(rideId);
+        rideDoc = await transaction.get(requestRef);
+        
+        if (rideDoc.exists) {
+          isInRequests = true;
+          rideRef = requestRef;
+        } else {
+          final rideDocRef = _ridesCollection.doc(rideId);
+          rideDoc = await transaction.get(rideDocRef);
+          if (!rideDoc.exists) throw Exception('Ride not found');
+          rideRef = rideDocRef;
+        }
 
-      final rideData = rideDoc.data() as Map<String, dynamic>;
-      final ride = RideModel.fromMap(rideData, rideId);
+        final rideData = rideDoc.data() as Map<String, dynamic>;
+        final ride = RideModel.fromMap(rideData, rideId);
+        
+        // Verify ride can be cancelled (not already completed)
+        final currentStatus = rideData['status'];
+        final isCompleted = _statusMatches(currentStatus, RideStatus.completed) ||
+                           (currentStatus is String && currentStatus == 'completed');
+        
+        if (isCompleted) {
+          throw Exception('Cannot cancel a completed ride');
+        }
 
-      // Update the ride status in the appropriate collection
-      if (isInRequests) {
-        // Move from requests to rides collection when cancelling
-        batch.set(_ridesCollection.doc(rideId), {
-          ...rideData,
+        // Update the ride status in the appropriate collection
+        if (isInRequests) {
+          // Move from requests to rides collection when cancelling
+          transaction.set(_ridesCollection.doc(rideId), {
+            ...rideData,
+            'status': RideStatus.cancelled.index,
+            'cancellationReason': reason,
+            'cancelledAt': now.millisecondsSinceEpoch,
+          });
+          // Delete from requests collection
+          transaction.delete(requestRef);
+        } else {
+          // Update in rides collection
+          transaction.update(rideRef!, {
+            'status': RideStatus.cancelled.index,
+            'cancellationReason': reason,
+            'cancelledAt': now.millisecondsSinceEpoch,
+          });
+        }
+
+        // Add to driver's ride history
+        final driverHistoryRef = _driversCollection.doc(driverId).collection('rideHistory').doc(rideId);
+        transaction.set(driverHistoryRef, {
+          'rideId': rideId,
+          'passengerId': ride.passengerId,
+          'pickupAddress': ride.pickupAddress,
+          'dropoffAddress': ride.dropoffAddress,
+          'estimatedFare': ride.estimatedFare,
+          'actualFare': 0.0, // No earnings for cancelled rides
           'status': RideStatus.cancelled.index,
-          'cancellationReason': reason,
+          'requestTime': ride.requestTime.millisecondsSinceEpoch,
           'cancelledAt': now.millisecondsSinceEpoch,
-        });
-        // Delete from requests collection
-        batch.delete(_requestsCollection.doc(rideId));
-      } else {
-        // Update in rides collection
-        batch.update(_ridesCollection.doc(rideId), {
-          'status': RideStatus.cancelled.index,
           'cancellationReason': reason,
-          'cancelledAt': now.millisecondsSinceEpoch,
+          'earnings': 0.0, // No earnings
+          'isDriverCancellation': isDriverCancellation,
         });
-      }
 
-      // Add to driver's ride history
-      final driverHistoryRef = _driversCollection.doc(driverId).collection('rideHistory').doc(rideId);
-      batch.set(driverHistoryRef, {
-        'rideId': rideId,
-        'passengerId': ride.passengerId,
-        'pickupAddress': ride.pickupAddress,
-        'dropoffAddress': ride.dropoffAddress,
-        'estimatedFare': ride.estimatedFare,
-        'actualFare': 0.0, // No earnings for cancelled rides
-        'status': RideStatus.cancelled.index,
-        'requestTime': ride.requestTime.millisecondsSinceEpoch,
-        'cancelledAt': now.millisecondsSinceEpoch,
-        'cancellationReason': reason,
-        'earnings': 0.0, // No earnings
-        'isDriverCancellation': isDriverCancellation,
+        // If driver cancelled, they might lose some earnings (penalty)
+        final driverRef = _driversCollection.doc(driverId);
+        if (isDriverCancellation) {
+          // Optional: Apply cancellation penalty
+          final cancellationPenalty = 0.0; // Set to 0 for now, can be adjusted
+          transaction.update(driverRef, {
+            'totalEarnings': FieldValue.increment(-cancellationPenalty),
+            'status': DriverStatus.online.index, // Set driver back to online
+          });
+        } else {
+          // Passenger cancelled, no penalty for driver
+          transaction.update(driverRef, {
+            'status': DriverStatus.online.index,
+          });
+        }
+        
+        // Process refund for card payments
+        final paymentType = rideData['paymentType'] as String? ?? 'Cash';
+        final paymentStatus = rideData['paymentStatus'] as String? ?? 'pending';
+        if (paymentType.toLowerCase() == 'card' && paymentStatus == 'paid') {
+          final estimatedFare = ride.estimatedFare;
+          // Create refund request (will be processed by payment service)
+          final refundRef = _firestore.collection('refund_requests').doc();
+          transaction.set(refundRef, {
+            'rideId': rideId,
+            'userId': ride.passengerId,
+            'amount': estimatedFare,
+            'reason': reason ?? 'Ride cancelled',
+            'status': 'pending',
+            'createdAt': FieldValue.serverTimestamp(),
+            'cancelledBy': isDriverCancellation ? 'driver' : 'passenger',
+          });
+        }
       });
-
-      // If driver cancelled, they might lose some earnings (penalty)
-      if (isDriverCancellation) {
-        // Optional: Apply cancellation penalty
-        final cancellationPenalty = 0.0; // Set to 0 for now, can be adjusted
-        batch.update(_driversCollection.doc(driverId), {
-          'totalEarnings': FieldValue.increment(-cancellationPenalty),
-          'status': DriverStatus.online.index, // Set driver back to online
-        });
-      } else {
-        // Passenger cancelled, no penalty for driver
-        batch.update(_driversCollection.doc(driverId), {
-          'status': DriverStatus.online.index,
-        });
-      }
-
-      await batch.commit();
     } catch (e) {
       print('Error cancelling ride: $e');
       rethrow;
@@ -2481,26 +2762,49 @@ class DatabaseService extends ChangeNotifier {
 
   // --- NO CAR APPLICATIONS & VEHICLE OFFERS ---
   Future<void> saveNoCarApplication(Map<String, dynamic> applicationData) async {
-    await _firestore.collection('no_car_applications').add(applicationData);
+    await _firestore.collection('no_car_applications').add({
+      ...applicationData,
+      'createdAt': FieldValue.serverTimestamp(),
+      'status': 'pending',
+    });
   }
 
   Future<void> saveVehicleOffer(Map<String, dynamic> vehicleData) async {
-    await _firestore.collection('vehicle_offers').add(vehicleData);
+    await _firestore.collection('vehicle_offers').add({
+      ...vehicleData,
+      'createdAt': FieldValue.serverTimestamp(),
+      'isAvailable': true,
+      'status': 'active',
+    });
+  }
+
+  Future<void> updateNoCarApplicationStatus(String applicationId, String status) async {
+    await _firestore.collection('no_car_applications').doc(applicationId).update({
+      'status': status,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> updateVehicleOfferStatus(String offerId, String status) async {
+    await _firestore.collection('vehicle_offers').doc(offerId).update({
+      'status': status,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   Future<List<Map<String, dynamic>>> getNoCarApplications() async {
-    final snapshot = await _firestore.collection('no_car_applications').get();
-    return snapshot.docs.map((doc) => doc.data()).toList();
+    final snapshot = await _firestore.collection('no_car_applications').orderBy('createdAt', descending: true).get();
+    return snapshot.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList();
   }
 
   Future<List<Map<String, dynamic>>> getVehicleOffers() async {
     final snapshot = await _firestore.collection('vehicle_offers').where('isAvailable', isEqualTo: true).get();
-    return snapshot.docs.map((doc) => doc.data()).toList();
+    return snapshot.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList();
   }
 
   Future<List<Map<String, dynamic>>> getVehicleOffersByOwner(String ownerId) async {
     final snapshot = await _firestore.collection('vehicle_offers').where('ownerId', isEqualTo: ownerId).get();
-    return snapshot.docs.map((doc) => doc.data()).toList();
+    return snapshot.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList();
   }
 
   // Mock data for testing

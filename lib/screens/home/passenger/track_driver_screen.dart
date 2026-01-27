@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../../constants/app_colors.dart';
+import '../../../constants/app_theme.dart';
 import '../../../models/driver_model.dart';
 import '../../../models/ride_model.dart';
 import '../../../services/location_service.dart';
@@ -135,7 +136,7 @@ class _TrackDriverScreenState extends State<TrackDriverScreen> {
       _isTracking = true;
     });
 
-    // Update driver location every 3 seconds
+    // Update driver location every 3 seconds (fallback if Firestore snapshot fails)
     _locationTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
       if (mounted) {
         _getDriverLocation();
@@ -144,30 +145,61 @@ class _TrackDriverScreenState extends State<TrackDriverScreen> {
       }
     });
 
-    // Listen to driver location changes in real-time
+    // Listen to driver location changes in real-time (primary method - instant updates)
     _locationSubscription = FirebaseFirestore.instance
         .collection('drivers')
         .doc(widget.driverId)
         .snapshots()
-        .listen((snapshot) {
-      if (snapshot.exists && mounted) {
-        final data = snapshot.data();
-        if (data != null && data['currentLocation'] != null) {
-          final location = data['currentLocation'];
-          final newLocation = LatLng(
-            location['latitude'] as double,
-            location['longitude'] as double,
-          );
-          
-          setState(() {
-            _driverLocation = newLocation;
-          });
-          
-          _updateMap();
-          _calculateRoute();
+        .listen(
+      (snapshot) {
+        if (snapshot.exists && mounted) {
+          final data = snapshot.data();
+          if (data != null && data['currentLocation'] != null) {
+            final location = data['currentLocation'];
+            final timestamp = location['timestamp'] as Timestamp?;
+            
+            // Only update if location is recent (within last 30 seconds)
+            if (timestamp != null) {
+              final locationAge = DateTime.now().difference(timestamp.toDate());
+              if (locationAge.inSeconds > 30) {
+                print('⚠️ Driver location is stale (${locationAge.inSeconds}s old)');
+                return; // Skip stale locations
+              }
+            }
+            
+            final newLocation = LatLng(
+              location['latitude'] as double,
+              location['longitude'] as double,
+            );
+            
+            // Only update if location actually changed (reduce unnecessary updates)
+            if (_driverLocation == null || 
+                _driverLocation!.latitude != newLocation.latitude ||
+                _driverLocation!.longitude != newLocation.longitude) {
+              setState(() {
+                _driverLocation = newLocation;
+              });
+              
+              _updateMap();
+              _calculateRoute();
+            }
+          }
         }
-      }
-    });
+      },
+      onError: (error) {
+        print('❌ Error in driver location stream: $error');
+        // Fallback to periodic polling if stream fails
+        if (mounted && _locationTimer == null) {
+          _locationTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+            if (mounted) {
+              _getDriverLocation();
+            } else {
+              timer.cancel();
+            }
+          });
+        }
+      },
+    );
   }
 
   void _updateMap() {
@@ -416,7 +448,7 @@ class _TrackDriverScreenState extends State<TrackDriverScreen> {
                   children: [
                     Text(
                       _estimatedTime.isNotEmpty ? _estimatedTime : '--',
-                      style: const TextStyle(
+                      style:  TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                         color: AppTheme.primaryColor,

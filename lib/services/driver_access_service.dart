@@ -37,35 +37,8 @@ class DriverAccessService {
 
       print('✅ User is registered as driver');
 
-      // Check if driver has chosen pay-later first
-      bool isPayLater = false;
-      if (driverDoc.exists) {
-        final driverData = driverDoc.data() as Map<String, dynamic>;
-        isPayLater = driverData['payLater'] ?? false;
-        print('💰 Driver pay-later status: $isPayLater');
-      }
-      
-      // Only check payment if driver is not using pay-later
-      if (!isPayLater) {
-        final paymentsQuery = await _firestore
-            .collection('driver_payments')
-            .where('driverId', isEqualTo: userId)
-            .where('status', isEqualTo: 'success')
-            .orderBy('timestamp', descending: true)
-            .limit(1)
-            .get();
-
-        if (paymentsQuery.docs.isEmpty) {
-          print('❌ No successful payment found for driver: $userId');
-          return {
-            'canAccess': false,
-            'reason': 'Payment required',
-            'status': 'payment_required',
-          };
-        }
-        
-        print('✅ Payment verified for driver: $userId');
-      }
+      // Payment is no longer required for any driver
+      print('✅ Payment is free for all drivers');
 
       // Check if driver signup is required
       if (userData['requiresDriverSignup'] == true || !driverDoc.exists) {
@@ -139,43 +112,8 @@ class DriverAccessService {
 
   // Check if payment is required
   Future<bool> isPaymentRequired(String userId) async {
-    try {
-      // First check if driver has chosen pay-later
-      final driverDoc = await _firestore.collection('drivers').doc(userId).get();
-      if (driverDoc.exists) {
-        final driverData = driverDoc.data() as Map<String, dynamic>;
-        final payLater = driverData['payLater'] ?? false;
-        
-        // If driver chose pay-later, payment is not required upfront
-        if (payLater) {
-          return false;
-        }
-      }
-      
-      final paymentsQuery = await _firestore
-          .collection('driver_payments')
-          .where('driverId', isEqualTo: userId)
-          .where('status', isEqualTo: 'success')
-          .orderBy('timestamp', descending: true)
-          .limit(1)
-          .get();
-
-      if (paymentsQuery.docs.isEmpty) {
-        return true;
-      }
-
-      // Check if the last payment is still valid
-      final lastPayment = paymentsQuery.docs.first.data();
-      final paymentDate = (lastPayment['timestamp'] as Timestamp).toDate();
-      final validUntil = lastPayment['validUntil'] != null 
-          ? (lastPayment['validUntil'] as Timestamp).toDate()
-          : paymentDate.add(const Duration(days: 7)); // Default 7-day validity
-
-      return DateTime.now().isAfter(validUntil);
-    } catch (e) {
-      print('Error checking payment status: $e');
-      return true;
-    }
+    // Payment is no longer required for any driver
+    return false;
   }
 
   // Helper method to check if driver profile is complete

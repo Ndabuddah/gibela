@@ -74,19 +74,32 @@ class _EarningsScreenState extends State<EarningsScreen> with SingleTickerProvid
         final week = await dbService.getEarningsAndRidesForPeriod(user.uid, period: 'week');
         final month = await dbService.getEarningsAndRidesForPeriod(user.uid, period: 'month');
         final history = await dbService.getAcceptedRides(user.uid);
-        final driver = await dbService.getCurrentDriver();
+        
+        // Try to get driver profile, and create one if it doesn't exist
+        DriverModel? driver;
+        try {
+          driver = await dbService.getCurrentDriver();
+          if (driver == null) {
+            // Driver profile doesn't exist, try to ensure it exists
+            driver = await dbService.ensureDriverProfile(user.uid, user);
+          }
+        } catch (e) {
+          print('Error loading driver profile: $e');
+          // Continue without driver profile - earnings can still be displayed
+          driver = null;
+        }
 
         if (mounted) {
           setState(() {
-            dailyEarnings = (today['earnings'] ?? 0.0) as double;
-            dailyRides = (today['rides'] ?? 0) as int;
-            weeklyEarnings = (week['earnings'] ?? 0.0) as double;
-            weeklyRides = (week['rides'] ?? 0) as int;
-            monthlyEarnings = (month['earnings'] ?? 0.0) as double;
-            monthlyRides = (month['rides'] ?? 0) as int;
-            cardEarnings = (today['cardEarnings'] ?? 0.0) as double;
-            weeklyCardEarnings = (week['cardEarnings'] ?? 0.0) as double;
-            monthlyCardEarnings = (month['cardEarnings'] ?? 0.0) as double;
+            dailyEarnings = ((today['earnings'] ?? 0) as num).toDouble();
+            dailyRides = ((today['rides'] ?? 0) as num).toInt();
+            weeklyEarnings = ((week['earnings'] ?? 0) as num).toDouble();
+            weeklyRides = ((week['rides'] ?? 0) as num).toInt();
+            monthlyEarnings = ((month['earnings'] ?? 0) as num).toDouble();
+            monthlyRides = ((month['rides'] ?? 0) as num).toInt();
+            cardEarnings = ((today['cardEarnings'] ?? 0) as num).toDouble();
+            weeklyCardEarnings = ((week['cardEarnings'] ?? 0) as num).toDouble();
+            monthlyCardEarnings = ((month['cardEarnings'] ?? 0) as num).toDouble();
             _driver = driver;
             rideHistory = history;
             isLoading = false;
@@ -107,17 +120,59 @@ class _EarningsScreenState extends State<EarningsScreen> with SingleTickerProvid
   }
 
   Future<void> _updatePaymentModel(PaymentModel newModel) async {
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final dbService = Provider.of<DatabaseService>(context, listen: false);
+    final user = authService.userModel;
+    
+    // If driver is null, try to fetch it again or create it
     if (_driver == null || _driver!.userId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Driver information not available'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
+      if (user != null) {
+        try {
+          // Try to get or create driver profile
+          DriverModel? driver = await dbService.getCurrentDriver();
+          if (driver == null) {
+            driver = await dbService.ensureDriverProfile(user.uid, user);
+          }
+          
+          if (driver != null) {
+            setState(() {
+              _driver = driver;
+            });
+          } else {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Unable to load driver profile. Please try again.'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
+            return;
+          }
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Error loading driver profile: $e'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          return;
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Please log in to update payment settings.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
     }
     
-    final dbService = Provider.of<DatabaseService>(context, listen: false);
     try {
       // Update the driver's payment model in the database
       await dbService.updateDriverPaymentModel(_driver!.userId, newModel);
@@ -171,9 +226,9 @@ class _EarningsScreenState extends State<EarningsScreen> with SingleTickerProvid
   Widget build(BuildContext context) {
     final moneyDue = _calculateMoneyDue();
     final totalRides = rideHistory.length;
-    final completedRides = rideHistory.where((r) => r['status'] == RideStatus.completed.index).length;
-    final cancelledRides = rideHistory.where((r) => r['status'] == RideStatus.cancelled.index).length;
-    final avgFare = completedRides > 0 ? rideHistory.where((r) => r['status'] == RideStatus.completed.index).map((r) => r['fare'] as double).reduce((a, b) => a + b) / completedRides : 0.0;
+    final completedRides = rideHistory.where((r) => ((r['status'] as num?)?.toInt() ?? RideStatus.accepted.index) == RideStatus.completed.index).length;
+    final cancelledRides = rideHistory.where((r) => ((r['status'] as num?)?.toInt() ?? RideStatus.accepted.index) == RideStatus.cancelled.index).length;
+    final avgFare = completedRides > 0 ? rideHistory.where((r) => ((r['status'] as num?)?.toInt() ?? RideStatus.accepted.index) == RideStatus.completed.index).map((r) => ((r['fare'] ?? r['actualFare'] ?? r['estimatedFare'] ?? 0) as num).toDouble()).reduce((a, b) => a + b) / completedRides : 0.0;
     final completionRate = totalRides > 0 ? (completedRides / totalRides * 100).toStringAsFixed(1) : '0.0';
     final cancellationRate = totalRides > 0 ? (cancelledRides / totalRides * 100).toStringAsFixed(1) : '0.0';
 
@@ -309,7 +364,7 @@ class _EarningsScreenState extends State<EarningsScreen> with SingleTickerProvid
                                         Expanded(
                                           child: _paymentModelOption(
                                             title: 'Weekly Payment',
-                                            subtitle: _driver?.payLater == true ? 'Card - R600' : 'Card - R450',
+                                            subtitle: 'Free Platform Access',
                                             isSelected: _driver?.paymentModel == PaymentModel.weekly,
                                             color: Color(0xFF4F8FFF),
                                             onTap: () => _updatePaymentModel(PaymentModel.weekly),
@@ -319,7 +374,7 @@ class _EarningsScreenState extends State<EarningsScreen> with SingleTickerProvid
                                         Expanded(
                                           child: _paymentModelOption(
                                             title: 'Percentage',
-                                            subtitle: '10.5% of earnings',
+                                            subtitle: '0% commission',
                                             isSelected: _driver?.paymentModel == PaymentModel.percentage,
                                             color: Color(0xFF8B5CF6),
                                             onTap: () => _updatePaymentModel(PaymentModel.percentage),
@@ -616,12 +671,12 @@ class _EarningsScreenState extends State<EarningsScreen> with SingleTickerProvid
                             delegate: SliverChildBuilderDelegate(
                               (context, index) {
                                 final ride = rideHistory[index];
-                                final status = ride['status'];
+                                final status = (ride['status'] as num?)?.toInt() ?? RideStatus.accepted.index;
                                 final isCompleted = status == RideStatus.completed.index;
                                 final isCancelled = status == RideStatus.cancelled.index;
-                                final fare = isCancelled ? 0.0 : (ride['fare'] as double? ?? 0.0);
+                                final fare = isCancelled ? 0.0 : ((ride['fare'] ?? ride['actualFare'] ?? ride['estimatedFare'] ?? 0) as num).toDouble();
                                 final date = ride['date'] != null
-                                    ? DateTime.fromMillisecondsSinceEpoch(ride['date'])
+                                    ? DateTime.fromMillisecondsSinceEpoch((ride['date'] as num).toInt())
                                     : null;
                                 return _rideTimelineCard(
                                   fare: fare,

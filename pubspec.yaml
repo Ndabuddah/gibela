@@ -64,6 +64,8 @@ dependencies:
   smooth_page_indicator:
   timeago:
   connectivity_plus:
+  share_plus: ^7.0.2
+  crypto:
 
 dev_dependencies:
   flutter_test:

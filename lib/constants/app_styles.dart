@@ -62,10 +62,10 @@ class AppStyles {
     height: 1.5,
   );
 
-  static const TextStyle captionStyle = TextStyle(
+  static final TextStyle captionStyle = TextStyle(
     fontSize: fontSizeSmall,
     fontWeight: fontWeightRegular,
-    color: AppColors.textMuted,
+    color: AppColors.lightTextHint,
   );
 
   // Input Decoration
@@ -76,8 +76,8 @@ class AppStyles {
   }) {
     return InputDecoration(
       hintText: hintText,
-      hintStyle: TextStyle(color: AppColors.textMuted),
-      prefixIcon: prefixIcon != null ? Icon(prefixIcon, color: AppColors.textMuted) : null,
+      hintStyle: TextStyle(color: AppColors.lightTextHint),
+      prefixIcon: prefixIcon != null ? Icon(prefixIcon, color: AppColors.lightTextHint) : null,
       suffix: suffix,
       filled: true,
       fillColor: AppColors.darkCard,

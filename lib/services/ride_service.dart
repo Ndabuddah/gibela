@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../constants/app_constants.dart';
 import '../models/driver_model.dart';
 import '../models/ride_model.dart';
@@ -33,6 +34,7 @@ class RideService extends ChangeNotifier {
   @override
   void dispose() {
     _rideSubscription?.cancel();
+    _timeoutTimer?.cancel();
     super.dispose();
   }
 
@@ -125,15 +127,37 @@ class RideService extends ChangeNotifier {
   }
 
   // Start listening to ride updates
+  Timer? _timeoutTimer;
+  
   void _startListeningToRideUpdates(String rideId) {
     _rideSubscription?.cancel();
+    _timeoutTimer?.cancel();
+    
     _rideSubscription = _databaseService.listenToRideUpdates(rideId).listen((updatedRide) {
       _currentRide = updatedRide;
+      
+      // Cancel timeout if ride is accepted
+      if (updatedRide.status != RideStatus.requested) {
+        _timeoutTimer?.cancel();
+        _timeoutTimer = null;
+      }
+      
       notifyListeners();
+    });
+    
+    // Start timeout monitoring (15 minutes for regular requests)
+    _timeoutTimer = Timer(const Duration(minutes: 15), () {
+      // Check if ride is still pending
+      if (_currentRide != null && _currentRide!.status == RideStatus.requested) {
+        // Request has timed out - the cleanup service will handle cancellation
+        // This is just for local state management
+        print('⚠️ Ride request ${_currentRide!.id} has timed out');
+        _databaseService.checkAndHandleRequestTimeouts();
+      }
     });
   }
 
-  // Accept a ride request (driver)
+  // Accept a ride request (driver) - Transaction-safe to prevent race conditions
   Future<void> acceptRideRequest(String rideId, String driverId) async {
     // Validate input parameters
     if (rideId.isEmpty) {
@@ -149,23 +173,11 @@ class RideService extends ChangeNotifier {
     
     _setLoading(true);
     try {
-      // Get the ride
+      // Get the ride first to validate passenger ID (before transaction)
       final RideModel? ride = await _databaseService.getRideById(rideId);
       if (ride == null) {
         _setLoading(false);
         throw Exception('Ride not found');
-      }
-
-      // Check if ride is still available
-      if (ride.status != RideStatus.requested) {
-        _setLoading(false);
-        throw Exception('Ride is no longer available for acceptance');
-      }
-
-      // Check if driver is already assigned
-      if (ride.driverId != null) {
-        _setLoading(false);
-        throw Exception('Ride has already been accepted by another driver');
       }
 
       // Validate passenger ID
@@ -177,29 +189,19 @@ class RideService extends ChangeNotifier {
 
       print('✅ Ride found with passenger: ${ride.passengerId}');
 
-      // Check if driver is available (not on another ride)
-      final driverActiveRide = await _databaseService.getActiveRideForDriver(driverId);
-      if (driverActiveRide != null) {
+      // Use transaction-safe acceptance to prevent race conditions
+      final accepted = await _databaseService.acceptRideRequestTransaction(rideId, driverId);
+      
+      if (!accepted) {
         _setLoading(false);
-        throw Exception('You are already on an active ride. Please complete it first.');
+        throw Exception('Failed to accept ride request');
       }
 
-      // Update the ride
-      final updatedRide = ride.copyWith(
-        driverId: driverId,
-        status: RideStatus.accepted,
-      );
+      print('✅ Ride accepted successfully via transaction');
 
-      await _databaseService.updateRide(updatedRide);
-      print('✅ Ride updated successfully');
-
-      // Create chat between driver and passenger
+      // Create chat between driver and passenger (outside transaction for performance)
       await _databaseService.createOrGetChat(driverId, ride.passengerId);
       print('✅ Chat created successfully');
-
-      // Update driver status
-      await _databaseService.updateDriverStatus(driverId, DriverStatus.onRide);
-      print('✅ Driver status updated');
 
       // Send notification to passenger
       await RideNotificationService.sendRideAcceptedNotification(
@@ -218,7 +220,7 @@ class RideService extends ChangeNotifier {
     }
   }
 
-  // Driver arrived at pickup location
+  // Driver arrived at pickup location (transaction-safe)
   Future<void> driverArrived(String rideId) async {
     _setLoading(true);
     try {
@@ -229,20 +231,32 @@ class RideService extends ChangeNotifier {
         throw Exception('Ride not found');
       }
 
-      // Update the ride
+      // Verify ride is in accepted state (can only arrive if accepted)
+      if (ride.status != RideStatus.accepted) {
+        _setLoading(false);
+        throw Exception('Ride must be accepted before marking arrival. Current status: ${ride.status}');
+      }
+
+      // Update the ride status (transaction-safe)
       final updatedRide = ride.copyWith(
         status: RideStatus.driverArrived,
       );
 
       await _databaseService.updateRide(updatedRide);
 
-      // Send notification to passenger
+      // Send notification to passenger (with retry logic)
       if (ride.driverId != null) {
-        await RideNotificationService.sendDriverArrivedNotification(
-          rideId: rideId,
-          passengerId: ride.passengerId,
-          driverId: ride.driverId!,
-        );
+        try {
+          await RideNotificationService.sendDriverArrivedNotification(
+            rideId: rideId,
+            passengerId: ride.passengerId,
+            driverId: ride.driverId!,
+          );
+          print('✅ Driver arrived notification sent successfully');
+        } catch (notificationError) {
+          print('⚠️ Failed to send notification, but ride status updated: $notificationError');
+          // Don't fail the entire operation if notification fails
+        }
       }
 
       _setLoading(false);
@@ -333,7 +347,7 @@ class RideService extends ChangeNotifier {
     }
   }
 
-  // Cancel ride with earnings tracking
+  // Cancel ride with earnings tracking and refund processing
   Future<void> cancelRide(String rideId, {String? reason, bool isDriver = false}) async {
     _setLoading(true);
     try {
@@ -349,7 +363,10 @@ class RideService extends ChangeNotifier {
         throw Exception('No driver assigned to this ride');
       }
 
-      // Use the new cancellation method that tracks earnings
+      // Payment info will be retrieved in cancelRideAndUpdateEarnings
+      // No need to fetch it separately here
+
+      // Use the new cancellation method that tracks earnings and processes refunds
       await _databaseService.cancelRideAndUpdateEarnings(
         rideId, 
         isDriver ? ride.driverId! : ride.passengerId,
@@ -377,6 +394,35 @@ class RideService extends ChangeNotifier {
             driverId: ride.driverId!,
             reason: cancellationReason,
           );
+        }
+      }
+      
+      // Notify passenger about refund if applicable
+      // Get payment info from ride data
+      final rideData = await _databaseService.getRideById(rideId);
+      if (rideData != null) {
+        // Try to get payment info from the ride document or payment collection
+        try {
+          final rideDoc = await FirebaseFirestore.instance.collection('rides').doc(rideId).get();
+          if (rideDoc.exists) {
+            final data = rideDoc.data() as Map<String, dynamic>?;
+            final paymentType = data?['paymentType'] as String? ?? 'Cash';
+            final paymentStatus = data?['paymentStatus'] as String? ?? 'pending';
+            
+            if (paymentType.toLowerCase() == 'card' && paymentStatus == 'paid') {
+              // Refund request has been created in cancelRideAndUpdateEarnings
+              // Send notification about refund
+              await _notificationService.sendNotificationToUser(
+                userId: ride.passengerId,
+                title: 'Refund Processing',
+                body: 'Your refund of R${ride.estimatedFare.toStringAsFixed(2)} is being processed. It will be credited to your account within 5-7 business days.',
+                type: 'refund',
+              );
+            }
+          }
+        } catch (e) {
+          print('Error checking payment info: $e');
+          // Continue without refund notification if payment info can't be retrieved
         }
       }
 

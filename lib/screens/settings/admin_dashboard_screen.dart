@@ -1059,6 +1059,8 @@ class _DriverDocumentsCard extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     
     return Card(
+      color: AppColors.getCardColor(isDark),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -1073,8 +1075,57 @@ class _DriverDocumentsCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-            // Add document viewing functionality here
-            const Text('Document viewing functionality to be implemented'),
+            FutureBuilder<DocumentSnapshot>(
+              future: FirebaseFirestore.instance.collection('drivers').doc(driverId).get(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                
+                if (!snapshot.hasData || !snapshot.data!.exists) {
+                  return const Text('No documents found');
+                }
+                
+                final data = snapshot.data!.data() as Map<String, dynamic>;
+                final docs = data['documents'] as Map<String, dynamic>? ?? {};
+                
+                if (docs.isEmpty) {
+                  return const Text('No documents uploaded');
+                }
+                
+                return Column(
+                  children: docs.entries.map((entry) {
+                    return ListTile(
+                      title: Text(entry.key),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.visibility),
+                        onPressed: () => _showDocument(context, entry.key, entry.value),
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showDocument(BuildContext context, String title, String url) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AppBar(title: Text(title), automaticallyImplyLeading: false, actions: [IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context))]),
+            InteractiveViewer(
+              child: Image.network(url, loadingBuilder: (context, child, loadingProgress) {
+                if (loadingProgress == null) return child;
+                return const Center(child: CircularProgressIndicator());
+              }, errorBuilder: (context, error, stackTrace) => const Padding(padding: EdgeInsets.all(20), child: Text('Error loading document'))),
+            ),
           ],
         ),
       ),

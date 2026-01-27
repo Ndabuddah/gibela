@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../models/notification_model.dart';
 
 class EnhancedNotificationService {
@@ -33,7 +34,30 @@ class EnhancedNotificationService {
 
   // Update FCM token
   Future<void> updateFCMToken(String token) async {
-    // TODO: Update user's FCM token in the database
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        return; // User not logged in
+      }
+
+      // Update FCM token in user document
+      await _firestore.collection('users').doc(user.uid).update({
+        'fcmToken': token,
+        'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Also update in drivers collection if user is a driver
+      final driverDoc = await _firestore.collection('drivers').doc(user.uid).get();
+      if (driverDoc.exists) {
+        await _firestore.collection('drivers').doc(user.uid).update({
+          'fcmToken': token,
+          'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      // Log error but don't throw - token update failure shouldn't break the app
+      print('Error updating FCM token: $e');
+    }
   }
 
   // Create notification with category and priority

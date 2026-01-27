@@ -3,11 +3,17 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../constants/app_colors.dart';
 import '../../../providers/theme_provider.dart';
-
 import '../../../widgets/common/loading_indicator.dart';
+import '../../../widgets/common/rating_dialog.dart';
+import '../../../services/database_service.dart';
+import '../../../widgets/common/modern_alert_dialog.dart';
+import 'request_ride_screen.dart';
+import 'ride_progress_screen.dart';
+import '../../chat/chat_screen.dart';
 
 class MyBookingsScreen extends StatefulWidget {
   const MyBookingsScreen({Key? key}) : super(key: key);
@@ -764,16 +770,12 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
                   ),
                   if (driverPhone.isNotEmpty)
                     IconButton(
-                      onPressed: () {
-                        // TODO: Implement call functionality
-                        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Call functionality coming soon!')),
-          );
-                      },
+                      onPressed: () => _makePhoneCall(driverPhone),
                       icon: Icon(
                         Icons.phone,
                         color: AppColors.primary,
                       ),
+                      tooltip: 'Call driver',
                     ),
                 ],
               ),
@@ -787,10 +789,16 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () {
-                      // TODO: Navigate to tracking screen
-                      ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Tracking screen coming soon!')),
-          );
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => RideProgressScreen(
+                            rideId: booking['id'],
+                            pickupAddress: booking['pickupAddress'] ?? '',
+                            dropoffAddress: booking['dropoffAddress'] ?? '',
+                          ),
+                        ),
+                      );
                     },
                     icon: const Icon(Icons.location_on),
                     label: const Text('Track'),
@@ -805,12 +813,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: () {
-                      // TODO: Navigate to chat screen
-                      ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Chat functionality coming soon!')),
-          );
-                    },
+                    onPressed: () => _openChat(booking),
                     icon: const Icon(Icons.chat),
                     label: const Text('Chat'),
                     style: ElevatedButton.styleFrom(
@@ -976,12 +979,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
                 children: [
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: () {
-                        // TODO: Implement rebook functionality
-                        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Rebook functionality coming soon!')),
-          );
-                      },
+                      onPressed: () => _rebookRide(booking),
                       icon: const Icon(Icons.replay),
                       label: const Text('Rebook'),
                       style: OutlinedButton.styleFrom(
@@ -995,12 +993,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
                   const SizedBox(width: 12),
                   Expanded(
                     child: ElevatedButton.icon(
-                      onPressed: () {
-                        // TODO: Implement rating functionality
-                        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Rating functionality coming soon!')),
-          );
-                      },
+                      onPressed: () => _showRatingDialog(booking),
                       icon: const Icon(Icons.star),
                       label: const Text('Rate'),
                       style: ElevatedButton.styleFrom(
@@ -1152,5 +1145,229 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
         ],
       ),
     );
+  }
+
+  Future<void> _showRatingDialog(Map<String, dynamic> booking) async {
+    final driverId = booking['driverId'] as String?;
+    final bookingId = booking['id'] as String;
+    final driverName = booking['driverName'] as String? ?? 'Driver';
+
+    if (driverId == null || driverId.isEmpty) {
+      ModernSnackBar.show(
+        context,
+        message: 'Driver information not available for this ride',
+        isError: true,
+      );
+      return;
+    }
+
+    // Check if already rated
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final ratingDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(driverId)
+            .collection('ratings')
+            .doc(bookingId)
+            .get();
+
+        if (ratingDoc.exists) {
+          ModernSnackBar.show(
+            context,
+            message: 'You have already rated this driver',
+            isError: true,
+          );
+          return;
+        }
+      }
+    } catch (e) {
+      // Continue to show dialog even if check fails
+    }
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => RatingDialog(
+        isDriverRating: false,
+        receiverName: driverName,
+        onSubmit: (rating, notes, report) async {
+          try {
+            await DatabaseService().rateDriver(
+              rideId: bookingId,
+              driverId: driverId,
+              rating: rating,
+              notes: notes?.isEmpty ?? true ? null : notes,
+              report: report?.isEmpty ?? true ? null : report,
+            );
+
+            if (mounted) {
+              ModernSnackBar.show(
+                context,
+                message: 'Thank you for your rating!',
+              );
+              // Reload bookings to reflect the change
+              await _loadBookings();
+            }
+          } catch (e) {
+            if (mounted) {
+              ModernSnackBar.show(
+                context,
+                message: 'Failed to submit rating: $e',
+                isError: true,
+              );
+            }
+          }
+        },
+      ),
+    );
+  }
+
+  void _rebookRide(Map<String, dynamic> booking) {
+    final pickupAddress = booking['pickupAddress'] as String?;
+    final dropoffAddress = booking['dropoffAddress'] as String?;
+    final pickupCoordinates = booking['pickupCoordinates'] as List<dynamic>?;
+    final dropoffCoordinates = booking['dropoffCoordinates'] as List<dynamic>?;
+    final vehicleType = booking['vehicleType'] as String?;
+    final paymentType = booking['paymentType'] as String?;
+
+    if (pickupAddress == null || dropoffAddress == null) {
+      ModernSnackBar.show(
+        context,
+        message: 'Cannot rebook: Missing location information',
+        isError: true,
+      );
+      return;
+    }
+
+    // Convert coordinates if available
+    List<double>? pickupCoords;
+    List<double>? dropoffCoords;
+    
+    if (pickupCoordinates != null) {
+      pickupCoords = pickupCoordinates.map((e) => (e as num).toDouble()).toList();
+    }
+    if (dropoffCoordinates != null) {
+      dropoffCoords = dropoffCoordinates.map((e) => (e as num).toDouble()).toList();
+    }
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => RequestRideScreen(
+          initialPickupAddress: pickupAddress,
+          initialDropoffAddress: dropoffAddress,
+          initialPickupCoordinates: pickupCoords,
+          initialDropoffCoordinates: dropoffCoords,
+          initialVehicleType: vehicleType,
+          initialPaymentType: paymentType,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _makePhoneCall(String phoneNumber) async {
+    // Remove any non-digit characters except +
+    final cleanedNumber = phoneNumber.replaceAll(RegExp(r'[^\d+]'), '');
+    
+    // Ensure the number starts with + or add country code if needed
+    String phoneUrl;
+    if (cleanedNumber.startsWith('+')) {
+      phoneUrl = 'tel:$cleanedNumber';
+    } else if (cleanedNumber.startsWith('0')) {
+      // Replace leading 0 with +27 for South Africa
+      phoneUrl = 'tel:+27${cleanedNumber.substring(1)}';
+    } else {
+      // Assume it's a local number, add +27
+      phoneUrl = 'tel:+27$cleanedNumber';
+    }
+
+    try {
+      final uri = Uri.parse(phoneUrl);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      } else {
+        if (mounted) {
+          ModernSnackBar.show(
+            context,
+            message: 'Cannot make phone call. Please check your device settings.',
+            isError: true,
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ModernSnackBar.show(
+          context,
+          message: 'Error making phone call: $e',
+          isError: true,
+        );
+      }
+    }
+  }
+
+  Future<void> _openChat(Map<String, dynamic> booking) async {
+    final driverId = booking['driverId'] as String?;
+    final user = FirebaseAuth.instance.currentUser;
+    
+    if (driverId == null || driverId.isEmpty) {
+      ModernSnackBar.show(
+        context,
+        message: 'Driver information not available for this ride',
+        isError: true,
+      );
+      return;
+    }
+
+    if (user == null) {
+      ModernSnackBar.show(
+        context,
+        message: 'Please log in to use chat',
+        isError: true,
+      );
+      return;
+    }
+
+    try {
+      // Get driver user model
+      final driverUser = await DatabaseService().getUserById(driverId);
+      if (driverUser == null) {
+        ModernSnackBar.show(
+          context,
+          message: 'Driver information not found',
+          isError: true,
+        );
+        return;
+      }
+
+      // Create or get chat ID (same pattern as other screens)
+      final participants = [user.uid, driverId]..sort();
+      final chatId = participants.join('_');
+
+      // Ensure chat exists in database
+      await DatabaseService().createOrGetChat(driverId, user.uid);
+
+      if (mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => ChatScreen(
+              chatId: chatId,
+              receiver: driverUser,
+              currentUserId: user.uid,
+            ),
+          ),
+        );
+        // Mark messages as read
+        await DatabaseService().markMessagesAsRead(chatId, user.uid);
+      }
+    } catch (e) {
+      if (mounted) {
+        ModernSnackBar.show(
+          context,
+          message: 'Error opening chat: $e',
+          isError: true,
+        );
+      }
+    }
   }
 } 

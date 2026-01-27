@@ -85,6 +85,7 @@ class _RatingDialogState extends State<RatingDialog> {
     
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      backgroundColor: isDark ? AppColors.darkCard : AppColors.white,
       child: Container(
         constraints: const BoxConstraints(maxHeight: 600),
         padding: const EdgeInsets.all(24),
@@ -117,7 +118,7 @@ class _RatingDialogState extends State<RatingDialog> {
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
-                          color: Colors.grey[800],
+                          color: isDark ? Colors.white : Colors.grey[800],
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -127,7 +128,7 @@ class _RatingDialogState extends State<RatingDialog> {
                           : 'How was your experience with ${widget.receiverName}?',
                         style: TextStyle(
                           fontSize: 14,
-                          color: Colors.grey[600],
+                          color: isDark ? Colors.white70 : Colors.grey[600],
                         ),
                       ),
                     ],
@@ -306,6 +307,7 @@ class _RatingDialogState extends State<RatingDialog> {
 
   Widget _buildReportOption(String reason) {
     final isSelected = reportReason == reason;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -322,10 +324,10 @@ class _RatingDialogState extends State<RatingDialog> {
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: isSelected ? AppColors.primary.withOpacity(0.1) : Colors.grey[50],
+            color: isSelected ? AppColors.primary.withOpacity(0.1) : (isDark ? Colors.white.withOpacity(0.05) : Colors.grey[50]),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isSelected ? AppColors.primary : Colors.grey[300]!,
+              color: isSelected ? AppColors.primary : (isDark ? Colors.white10 : Colors.grey[300]!),
               width: isSelected ? 2 : 1,
             ),
           ),
@@ -353,7 +355,7 @@ class _RatingDialogState extends State<RatingDialog> {
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                    color: isSelected ? AppColors.primary : Colors.grey[800],
+                    color: isSelected ? AppColors.primary : (isDark ? Colors.white : Colors.grey[800]),
                   ),
                 ),
               ),

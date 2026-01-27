@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_map/flutter_map.dart' as flutter_map;
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../constants/app_colors.dart';
 import '../../../models/ride_model.dart';
@@ -112,14 +114,26 @@ class _RideProgressScreenState extends State<RideProgressScreen>
   }
 
   void _startListeningToRideUpdates() {
-    _rideSubscription = _databaseService.listenToRideUpdates(widget.rideId).listen((updatedRide) {
-      if (mounted) {
-        setState(() {
-          _currentRide = updatedRide;
+    _rideSubscription = _databaseService.listenToRideUpdates(widget.rideId).listen(
+      (updatedRide) {
+        if (mounted) {
+          setState(() {
+            _currentRide = updatedRide;
+          });
+          _updateRideStatus(updatedRide);
+        }
+      },
+      onError: (error) {
+        print('❌ Error in ride updates stream: $error');
+        // Retry connection after delay
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) {
+            _startListeningToRideUpdates();
+          }
         });
-        _updateRideStatus(updatedRide);
-      }
-    });
+      },
+      cancelOnError: false, // Keep listening even on errors
+    );
   }
 
   void _updateRideStatus(RideModel ride) {
@@ -161,6 +175,16 @@ class _RideProgressScreenState extends State<RideProgressScreen>
           _rideStatus = 'Driver arrived!';
           _estimatedTime = 'Ready to go';
         });
+        // Show notification/snackbar when driver arrives
+        if (_currentRide?.status != RideStatus.driverArrived) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('🚗 Your driver has arrived!'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
         break;
       case RideStatus.inProgress:
         setState(() {
@@ -356,7 +380,7 @@ class _RideProgressScreenState extends State<RideProgressScreen>
                   cancelledAt: DateTime.now(),
                 );
                 await _databaseService.updateRide(updatedRide);
-                
+
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('Ride cancelled successfully'),
@@ -372,19 +396,19 @@ class _RideProgressScreenState extends State<RideProgressScreen>
                 );
               }
             }
-            
-        Navigator.of(context).pushReplacement(
-          PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) =>
+
+            Navigator.of(context).pushReplacement(
+              PageRouteBuilder(
+                pageBuilder: (context, animation, secondaryAnimation) =>
                 const PassengerHomeScreen(),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
-              return FadeTransition(opacity: animation, child: child);
-            },
-            transitionDuration: const Duration(milliseconds: 500),
-          ),
-        );
-      }
-        },
+                transitionsBuilder: (context, animation, secondaryAnimation,
+                    child) {
+                  return FadeTransition(opacity: animation, child: child);
+                },
+                transitionDuration: const Duration(milliseconds: 500),
+              ),
+            );
+          }}
       ),
     );
   }
@@ -470,6 +494,45 @@ class _RideProgressScreenState extends State<RideProgressScreen>
       ModernSnackBar.show(
         context,
         message: 'Error opening chat: $e',
+      );
+    }
+  }
+
+  Future<void> _shareLocation() async {
+    try {
+      final ride = _currentRide;
+      if (ride == null) {
+        ModernSnackBar.show(
+          context,
+          message: 'Ride information not available',
+          isError: true,
+        );
+        return;
+      }
+
+      // Build share text with location details
+      final shareText = '''
+🚗 Ride Details
+
+📍 Pickup: ${widget.pickupAddress}
+📍 Dropoff: ${widget.dropoffAddress}
+
+${_driverName.isNotEmpty ? '👤 Driver: $_driverName\n' : ''}${_driverVehicle.isNotEmpty ? '🚙 Vehicle: $_driverVehicle\n' : ''}${_driverPlate.isNotEmpty ? '🔢 Plate: $_driverPlate\n' : ''}
+Status: $_rideStatus
+${_estimatedTime.isNotEmpty ? '⏱️ ETA: $_estimatedTime' : ''}
+
+Shared via Gibela Ride App
+''';
+
+      await Share.share(
+        shareText,
+        subject: 'My Ride Details',
+      );
+    } catch (e) {
+      ModernSnackBar.show(
+        context,
+        message: 'Error sharing location: $e',
+        isError: true,
       );
     }
   }
@@ -625,33 +688,40 @@ class _RideProgressScreenState extends State<RideProgressScreen>
                               // Status Text
                               Text(
                                 _rideStatus,
-                                style: const TextStyle(
-                                  color: AppColors.black,
-                                  fontSize: 20,
+                                style: TextStyle(
+                                  color: AppColors.getTextPrimaryColor(isDark),
+                                  fontSize: 22,
                                   fontWeight: FontWeight.bold,
                                 ),
                                 textAlign: TextAlign.center,
                               ),
                               
-                              const SizedBox(height: 16),
+                              const SizedBox(height: 20),
                               
                               // Progress Bar
                               AnimatedBuilder(
                                 animation: _progressAnimation,
                                 builder: (context, child) {
                                   return Container(
-                                    height: 6,
+                                    height: 8,
                                     decoration: BoxDecoration(
-                                      color: AppColors.black.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(3),
+                                      color: isDark ? Colors.white10 : Colors.grey[200],
+                                      borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: FractionallySizedBox(
                                       alignment: Alignment.centerLeft,
                                       widthFactor: _progressAnimation.value,
                                       child: Container(
                                         decoration: BoxDecoration(
-                                          color: AppColors.black,
-                                          borderRadius: BorderRadius.circular(3),
+                                          gradient: AppColors.primaryGradient,
+                                          borderRadius: BorderRadius.circular(4),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: AppColors.primary.withOpacity(0.3),
+                                              blurRadius: 4,
+                                              offset: const Offset(0, 2),
+                                            ),
+                                          ],
                                         ),
                                       ),
                                     ),
@@ -659,123 +729,176 @@ class _RideProgressScreenState extends State<RideProgressScreen>
                                 },
                               ),
                               
-                              const SizedBox(height: 16),
+                              const SizedBox(height: 24),
                               
-                              // Driver Info (if driver found)
-                              if (_driverName.isNotEmpty) ...[
-                                Row(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 25,
-                                      backgroundColor: AppColors.black.withOpacity(0.1),
-                                      backgroundImage: _driverImageUrl.isNotEmpty ? NetworkImage(_driverImageUrl) : null,
-                                      child: _driverImageUrl.isEmpty
-                                          ? const Icon(Icons.person, color: AppColors.black, size: 30)
-                                          : null,
-                                    ),
-                                    const SizedBox(width: 16),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                              // Driver Info (Modern Card)
+                              if (_driverName.isNotEmpty)
+                                Container(
+                                  padding: const EdgeInsets.all(20),
+                                  decoration: BoxDecoration(
+                                    color: isDark ? Colors.white.withOpacity(0.05) : Colors.grey.withOpacity(0.05),
+                                    borderRadius: BorderRadius.circular(24),
+                                    border: Border.all(color: AppColors.getBorderColor(isDark).withOpacity(0.5)),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Stack(
+                                        alignment: Alignment.bottomRight,
                                         children: [
-                                          Text(
-                                            _driverName,
-                                            style: const TextStyle(
-                                              color: AppColors.black,
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w600,
+                                          Container(
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              border: Border.all(color: AppColors.primary, width: 2),
+                                            ),
+                                            child: CircleAvatar(
+                                              radius: 35,
+                                              backgroundColor: Colors.grey[300],
+                                              backgroundImage: _driverImageUrl.isNotEmpty ? NetworkImage(_driverImageUrl) : null,
+                                              child: _driverImageUrl.isEmpty 
+                                                  ? const Icon(Icons.person, size: 40, color: Colors.white) 
+                                                  : null,
                                             ),
                                           ),
-                                          const SizedBox(height: 4),
-                                          if (_driverVehicle.isNotEmpty)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black,
+                                              borderRadius: BorderRadius.circular(10),
+                                              border: Border.all(color: Colors.white, width: 1.5),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(Icons.star, color: Colors.amber, size: 12),
+                                                const SizedBox(width: 2),
+                                                Text(
+                                                  _driverRating.replaceAll(' ★', ''),
+                                                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              _driverName,
+                                              style: TextStyle(
+                                                fontSize: 18,
+                                                fontWeight: FontWeight.bold,
+                                                color: AppColors.getTextPrimaryColor(isDark),
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
                                             Text(
                                               _driverVehicle,
                                               style: TextStyle(
-                                                color: AppColors.black.withOpacity(0.8),
                                                 fontSize: 14,
+                                                color: AppColors.getTextSecondaryColor(isDark),
+                                                fontWeight: FontWeight.w500,
                                               ),
                                             ),
-                                          if (_driverPlate.isNotEmpty) ...[
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              'Plate: $_driverPlate',
-                                              style: TextStyle(
-                                                color: AppColors.black.withOpacity(0.8),
-                                                fontSize: 13,
+                                            const SizedBox(height: 4),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: AppColors.primary.withOpacity(0.1),
+                                                borderRadius: BorderRadius.circular(6),
+                                              ),
+                                              child: Text(
+                                                _driverPlate,
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: AppColors.primary,
+                                                  fontWeight: FontWeight.bold,
+                                                  letterSpacing: 1,
+                                                ),
                                               ),
                                             ),
                                           ],
-                                          const SizedBox(height: 4),
-                                          if (_driverRating.isNotEmpty)
-                                            Text(
-                                              _driverRating,
-                                              style: TextStyle(
-                                                color: AppColors.black.withOpacity(0.7),
-                                                fontSize: 13,
-                                              ),
-                                            ),
-                                        ],
+                                        ),
                                       ),
-                                    ),
-
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                              ],
                               
-                              const SizedBox(height: 16),
+                              const SizedBox(height: 24),
                               
                               // Estimated Time
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.access_time,
-                                    color: AppColors.black,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Estimated arrival: $_estimatedTime',
-                                    style: const TextStyle(
-                                      color: AppColors.black,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w500,
+                              Container(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                decoration: BoxDecoration(
+                                  color: AppColors.primary.withOpacity(0.05),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.access_time_filled,
+                                      color: AppColors.primary,
+                                      size: 20,
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Estimated arrival: $_estimatedTime',
+                                      style: TextStyle(
+                                        color: AppColors.primary,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ],
                           ),
                         ),
 
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 24),
 
                         // Action Buttons
                         Row(
                           children: [
                             Expanded(
-                              child: _ActionButton(
-                                icon: Icons.message,
+                              child: _buildActionBtn(
+                                icon: Icons.message_rounded,
                                 text: 'Message',
                                 onPressed: _openChat,
+                                color: Colors.blue,
                                 isDark: isDark,
                               ),
                             ),
-
-                            const SizedBox(width: 16),
+                            const SizedBox(width: 12),
                             Expanded(
-                              child: _ActionButton(
-                                icon: Icons.share_location,
+                              child: _buildActionBtn(
+                                icon: Icons.share_rounded,
                                 text: 'Share',
-                                onPressed: () {
-                                  // TODO: Implement share location
-                                  ModernSnackBar.show(
-                                    context,
-                                    message: 'Share location feature coming soon!',
-                                  );
-                                },
+                                onPressed: _shareLocation,
+                                color: AppColors.primary,
                                 isDark: isDark,
                               ),
+                            ),
+                            const SizedBox(width: 12),
+                            _buildCircleActionBtn(
+                              icon: Icons.phone_rounded,
+                              onPressed: () async {
+                                if (_currentRide?.driverId != null) {
+                                  final driver = await _databaseService.getUserById(_currentRide!.driverId!);
+                                  if (driver?.phoneNumber != null) {
+                                    final Uri url = Uri.parse('tel:${driver!.phoneNumber}');
+                                    if (await canLaunchUrl(url)) {
+                                      await launchUrl(url);
+                                    }
+                                  }
+                                }
+                              },
+                              color: Colors.green,
+                              isDark: isDark,
                             ),
                           ],
                         ),
@@ -790,97 +913,52 @@ class _RideProgressScreenState extends State<RideProgressScreen>
           ],
         ),
       ),
+    );}
+  Widget _buildActionBtn({
+    required IconData icon,
+    required String text,
+    required VoidCallback onPressed,
+    required Color color,
+    required bool isDark,
+  }) {
+    return SizedBox(
+      height: 54,
+      child: ElevatedButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 20),
+        label: Text(text),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          elevation: 0,
+          textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+        ),
+      ),
     );
   }
-}
 
-class _ActionButton extends StatefulWidget {
-  final IconData icon;
-  final String text;
-  final VoidCallback onPressed;
-  final bool isDark;
-
-  const _ActionButton({
-    required this.icon,
-    required this.text,
-    required this.onPressed,
-    required this.isDark,
-  });
-
-  @override
-  State<_ActionButton> createState() => _ActionButtonState();
-}
-
-class _ActionButtonState extends State<_ActionButton>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _scaleAnimation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 150),
-      vsync: this,
-    );
-    _scaleAnimation = Tween<double>(
-      begin: 1.0,
-      end: 0.95,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeInOut,
-    ));
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: (_) => _controller.forward(),
-      onTapUp: (_) => _controller.reverse(),
-      onTapCancel: () => _controller.reverse(),
-      child: AnimatedBuilder(
-        animation: _scaleAnimation,
-        builder: (context, child) {
-          return Transform.scale(
-            scale: _scaleAnimation.value,
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              decoration: BoxDecoration(
-                color: AppColors.getCardColor(widget.isDark),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: AppColors.getBorderColor(widget.isDark),
-                  width: 1,
-                ),
-              ),
-              child: Column(
-                children: [
-                  Icon(
-                    widget.icon,
-                    color: AppColors.primary,
-                    size: 24,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    widget.text,
-                    style: TextStyle(
-                      color: AppColors.getTextPrimaryColor(widget.isDark),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
+  Widget _buildCircleActionBtn({
+    required IconData icon,
+    required VoidCallback onPressed,
+    required Color color,
+    required bool isDark,
+  }) {
+    return SizedBox(
+      width: 54,
+      height: 54,
+      child: Material(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(16),
+          child: Icon(icon, color: color, size: 24),
+        ),
       ),
     );
   }
 }
+

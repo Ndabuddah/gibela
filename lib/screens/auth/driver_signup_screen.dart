@@ -12,6 +12,7 @@ import '../../constants/app_constants.dart';
 import '../../constants/provinces.dart';
 import '../../models/driver_model.dart';
 import '../../screens/payments/payment_screen.dart';
+import '../../services/auth_service.dart';
 import '../../services/clodinaryservice.dart' show CloudinaryService;
 import '../../services/database_service.dart';
 import '../../widgets/common/custom_button.dart';
@@ -121,9 +122,8 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
   }
 
   bool _genderIsFemale() {
-    // TODO: Replace with real gender check if available (e.g. from user profile or registration field)
-    // For now, always allow
-    return true;
+    final user = Provider.of<AuthService>(context, listen: false).userModel;
+    return user?.isGirl ?? false;
   }
   final _formKey = GlobalKey<FormState>();
 
@@ -575,8 +575,8 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
     }
   }
 
-  // Update _payR100 to navigate to PaymentScreen and only save after payment
-  Future<void> _payR100() async {
+  // Update _submitSignup to directly submit as it is now free
+  Future<void> _submitSignup() async {
     final validationError = _validateForm();
     if (validationError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -585,69 +585,40 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
       return;
     }
     
-    // Get email from Firebase Auth user
+    // Get current user
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null || user.email == null) {
+    if (user == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please log in with a valid email address.')),
+        const SnackBar(content: Text('Please log in again.')),
       );
       return;
     }
-    final email = user.email!;
-    final amount = 100.0;
     
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => PaymentScreen(
-          amount: amount,
-          email: email,
-          onPaymentSuccess: () async {
-            Navigator.pop(context); // Close PaymentScreen
-            
-            // Show loading indicator
-            if (mounted) {
-              _setLoading(true, message: 'Completing profile...');
-            }
-            
-            try {
-              // Step 1: Verify payment in database
-              if (!await _verifyPaymentSuccess()) {
-                if (mounted) {
-                  _setLoading(false);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Payment verification failed. Please try again.'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-                return;
-              }
-              
-              // Step 2: Upload documents to Cloudinary (only after payment verification)
-              final uploadedDocUrls = await _uploadDocumentsAfterPayment();
-              
-              // Step 3: Create driver profile with uploaded document URLs
-              await _submitDriverProfile(uploadedDocUrls);
-              
-            } catch (e) {
-              // Handle any errors during the process
-              if (mounted) {
-                _setLoading(false);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Error: ${e.toString()}'),
-                    backgroundColor: Colors.red,
-                    duration: const Duration(seconds: 5),
-                  ),
-                );
-              }
-            }
-          },
-        ),
-      ),
-    );
+    // Show loading indicator
+    if (mounted) {
+      _setLoading(true, message: 'Submitting profile...');
+    }
+    
+    try {
+      // Step 1: Upload documents to Cloudinary
+      final uploadedDocUrls = await _uploadDocumentsAfterPayment();
+      
+      // Step 2: Create driver profile with uploaded document URLs
+      await _submitDriverProfile(uploadedDocUrls);
+      
+    } catch (e) {
+      // Handle any errors during the process
+      if (mounted) {
+        _setLoading(false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
   }
 
   // Comprehensive form validation
@@ -1052,12 +1023,12 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Complete your driver profile',
                       style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textDark),
                     ),
                     const SizedBox(height: 8),
-                    const Text('Please provide the required information to register as a driver', style: TextStyle(color: AppColors.textLight)),
+                    Text('Please provide the required information to register as a driver', style: TextStyle(color: AppColors.textLight)),
                     const SizedBox(height: 24),
 
                     // Name (non-editable if already provided)
@@ -1108,7 +1079,7 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
 
                     // ID Type Toggle (ID vs Passport)
                     const SizedBox(height: 8),
-                    const Text('Identification Type', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textDark)),
+                    Text('Identification Type', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textDark)),
                     const SizedBox(height: 8),
                     Row(
                       children: [
@@ -1173,7 +1144,7 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
                     ],
 
                     // Vehicle Brand Dropdown
-                    const Text('Vehicle Brand', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textDark)),
+                    Text('Vehicle Brand', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textDark)),
                     const SizedBox(height: 8),
                     DropdownButtonFormField<String>(
                       value: _selectedBrand,
@@ -1223,7 +1194,7 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
                     if (_selectedModel == 'Other') const SizedBox(height: 16),
 
                     // Vehicle Color Dropdown
-                    const Text('Vehicle Color', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textDark)),
+                    Text('Vehicle Color', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textDark)),
                     const SizedBox(height: 8),
                     DropdownButtonFormField<String>(
                       value: _selectedColor,
@@ -1296,9 +1267,9 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
                     const SizedBox(height: 20),
 
                     // Document Uploads
-                    const Text('Required Documents', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textDark)),
+                    Text('Required Documents', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textDark)),
                     const SizedBox(height: 8),
-                    const Text('Please upload clear photos of the following documents', style: TextStyle(color: AppColors.textLight)),
+                    Text('Please upload clear photos of the following documents', style: TextStyle(color: AppColors.textLight)),
                     const SizedBox(height: 16),
 
                     // Document upload widgets (dynamic based on ID type)
@@ -1450,53 +1421,15 @@ class _DriverSignupScreenState extends State<DriverSignupScreen> {
                     const SizedBox(height: 24),
 
                     // Submit buttons
-                    Row(
-                      children: [
-                        Expanded(
-                          child: CustomButton(
-                            text: 'Pay R100 & Submit',
-                            onPressed: _payR100,
-                            isFullWidth: true,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: CustomButton(
-                            text: 'Pay Later',
-                            onPressed: _payLater,
-                            isFullWidth: true,
-                            color: Colors.orange,
-                          ),
-                        ),
-                      ],
+                    SizedBox(
+                      width: double.infinity,
+                      child: CustomButton(
+                        text: 'Submit Application',
+                        onPressed: _submitSignup,
+                        isFullWidth: true,
+                      ),
                     ),
                     const SizedBox(height: 16),
-
-                    // Pay Later Info
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.orange),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.info, color: Colors.orange),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: const [
-                                Text('Pay Later Option', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange)),
-                                SizedBox(height: 4),
-                                Text('If you choose "Pay Later", your first week platform fee will be R600 instead of R450.', style: TextStyle(color: Colors.orange, fontSize: 12)),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
 
                     const SizedBox(height: 16),
 

@@ -1,14 +1,14 @@
+// lib/screens/auth/email_verification_screen.dart
 import 'dart:async';
-
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:gibelbibela/screens/auth/signup_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/database_service.dart';
-
 import '../../constants/app_colors.dart';
 import '../../widgets/common/modern_alert_dialog.dart';
+import '../../widgets/common/custom_button.dart';
 import 'driver_signup_screen.dart';
 import 'passenger_registration_screen.dart';
 import 'no_car_application_screen.dart';
@@ -26,7 +26,6 @@ class EmailVerificationScreen extends StatefulWidget {
 class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   bool _isVerified = false;
   bool _isLoading = false;
-  bool _showLeaveWarning = false;
   bool _isNavigating = false;
   late final FirebaseAuth _auth;
   late final bool _isDriver;
@@ -41,7 +40,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   }
 
   void _checkInitialVerificationStatus() async {
-    // Check if already verified when screen loads
     final currentUser = _auth.currentUser;
     if (currentUser != null) {
       await currentUser.reload();
@@ -55,16 +53,14 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   }
 
   void _startPolling() {
-    _pollTimer?.cancel(); // Cancel any existing timer
+    _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
-      if (_isNavigating) return; // Prevent multiple navigation attempts
-
+      if (_isNavigating) return;
       try {
         final currentUser = _auth.currentUser;
         if (currentUser != null) {
           await currentUser.reload();
           final refreshedUser = _auth.currentUser;
-
           if (refreshedUser != null && refreshedUser.emailVerified) {
             _handleVerificationSuccess();
           }
@@ -76,150 +72,60 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   }
 
   void _handleVerificationSuccess() async {
-    if (_isNavigating) return; // Prevent multiple navigation attempts
-
+    if (_isNavigating) return;
     _isNavigating = true;
     _pollTimer?.cancel();
 
     if (mounted) {
       setState(() => _isVerified = true);
-
-      // Add a small delay to show the success message
       await Future.delayed(const Duration(milliseconds: 1500));
-
       if (!mounted) return;
 
       try {
-        // Get user model to determine specific role
         final databaseService = Provider.of<DatabaseService>(context, listen: false);
         final userModel = await databaseService.getUserById(widget.user.uid);
         
         if (userModel != null) {
-          // Navigate based on specific user role
           if (userModel.userRole == 'driver_no_car') {
-            print('📱 Navigating to driver no car application...');
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => NoCarApplicationScreen(user: widget.user, userModel: userModel),
-                settings: const RouteSettings(name: '/no_car_application'),
-              ),
-            );
+            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => NoCarApplicationScreen(user: widget.user, userModel: userModel)));
           } else if (userModel.userRole == 'car_owner') {
-            print('📱 Navigating to car owner application...');
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => OwnerApplicationScreen(user: widget.user, userModel: userModel),
-                settings: const RouteSettings(name: '/owner_application'),
-              ),
-            );
+            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => OwnerApplicationScreen(user: widget.user, userModel: userModel)));
           } else if (userModel.isDriver) {
-            print('📱 Navigating to driver registration...');
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => const DriverSignupScreen(),
-                settings: const RouteSettings(name: '/driver_signup'),
-              ),
-            );
+            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const DriverSignupScreen()));
           } else {
-            print('📱 Navigating to passenger registration...');
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => const PassengerRegistrationScreen(),
-                settings: const RouteSettings(name: '/passenger_registration'),
-              ),
-            );
+            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const PassengerRegistrationScreen()));
           }
         } else {
-          // Fallback to original logic if user model not found
-          if (_isDriver) {
-            print('📱 Navigating to driver registration...');
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => const DriverSignupScreen(),
-                settings: const RouteSettings(name: '/driver_signup'),
-              ),
-            );
-          } else {
-            print('📱 Navigating to passenger registration...');
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => const PassengerRegistrationScreen(),
-                settings: const RouteSettings(name: '/passenger_registration'),
-              ),
-            );
-          }
+          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => _isDriver ? const DriverSignupScreen() : const PassengerRegistrationScreen()));
         }
       } catch (e) {
-        print('Navigation error: $e');
-        if (mounted) {
-          _isNavigating = false;
-          setState(() => _isVerified = false);
-        }
+        _isNavigating = false;
+        setState(() => _isVerified = false);
       }
     }
   }
 
   void _manualCheck() async {
     if (_isNavigating) return;
-
     setState(() => _isLoading = true);
-
     try {
       final currentUser = _auth.currentUser;
       if (currentUser != null) {
         await currentUser.reload();
-        final refreshedUser = _auth.currentUser;
-
-        if (refreshedUser != null && refreshedUser.emailVerified) {
+        if (_auth.currentUser!.emailVerified) {
           _handleVerificationSuccess();
         } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Email not verified yet. Please check your inbox and try again.'),
-                duration: Duration(seconds: 3),
-              ),
-            );
-          }
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Email not verified yet.')));
         }
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error checking verification: ${e.toString()}'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _contactSupport() async {
-    final message = Uri.encodeComponent('My sign up is not working.');
-    final whatsappUrl = 'https://wa.me/27728965810?text=$message';
-
-    try {
-      if (await canLaunch(whatsappUrl)) {
-        await launch(whatsappUrl);
-      } else {
-        throw 'Could not launch WhatsApp';
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not open WhatsApp. Please contact support manually.'),
-            duration: Duration(seconds: 3),
-          ),
-        );
-      }
-    }
+    final whatsappUrl = 'https://wa.me/27728965810?text=${Uri.encodeComponent('My Gibela sign up is not working.')}';
+    if (await canLaunchUrl(Uri.parse(whatsappUrl))) await launchUrl(Uri.parse(whatsappUrl));
   }
 
   @override
@@ -230,55 +136,15 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
 
   Future<void> _resendEmail() async {
     if (_isLoading) return;
-
     setState(() => _isLoading = true);
-
     try {
-      final currentUser = _auth.currentUser;
-      if (currentUser != null && !currentUser.emailVerified) {
-        await currentUser.sendEmailVerification();
-
-        if (mounted) {
-          showDialog(
-            context: context,
-            builder: (context) => ModernAlertDialog(
-              title: 'Verification Email Sent',
-              message: 'A new verification link has been sent to your email address.',
-              confirmText: 'OK',
-            ),
-          );
-        }
-      }
-    } catch (e) {
+      await _auth.currentUser?.sendEmailVerification();
       if (mounted) {
-        showDialog(
-          context: context,
-          builder: (context) => ModernAlertDialog(
-            title: 'Error',
-            message: 'Failed to resend verification email. Please try again later.',
-            confirmText: 'OK',
-          ),
-        );
+        showDialog(context: context, builder: (context) => const ModernAlertDialog(title: 'Email Sent', message: 'A new verification link has been sent.', confirmText: 'OK'));
       }
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
-  }
-
-  Future<bool> _onWillPop() async {
-    if (_isNavigating) return false;
-
-    showDialog(
-      context: context,
-      builder: (context) => ModernAlertDialog(
-        title: 'Please Wait',
-        message: 'Please verify your email first. This screen will automatically redirect you once verification is complete.',
-        confirmText: 'OK',
-      ),
-    );
-    return false;
   }
 
   @override
@@ -286,168 +152,35 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final currentUser = _auth.currentUser;
 
-    if (currentUser == null) {
-      return Scaffold(
-        backgroundColor: AppColors.getBackgroundColor(isDark),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.warning, color: Colors.orange, size: 80),
-                const SizedBox(height: 32),
-                const Text(
-                  'Session Expired',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Please log in again to complete verification.',
-                  style: TextStyle(fontSize: 16),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 32),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.of(context).pushReplacementNamed('/login');
-                  },
-                  icon: const Icon(Icons.login),
-                  label: const Text('Go to Login'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
+    if (currentUser == null) return const Scaffold(body: Center(child: Text('Session expired. Please log in.')));
 
-    return WillPopScope(
-      onWillPop: _onWillPop,
-      child: Scaffold(
-        backgroundColor: AppColors.getBackgroundColor(isDark),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  _isVerified ? Icons.check_circle : Icons.email,
-                  color: _isVerified ? Colors.green : AppColors.primary,
-                  size: 80,
-                ),
-                const SizedBox(height: 32),
-                Text(
-                  _isVerified ? 'Email Verified!' : 'Verify Your Email',
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: _isVerified ? Colors.green : null,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  _isVerified ? 'Your email has been verified successfully. Redirecting...' : 'A verification link has been sent to ${currentUser.email}. Please check your email and click the verification link.',
-                  style: const TextStyle(fontSize: 16),
-                  textAlign: TextAlign.center,
-                ),
-                if (!_isVerified) ...[
-                  const SizedBox(height: 12),
-                  TextButton.icon(
-                    icon: const Icon(Icons.arrow_back),
-                    label: const Text('Go back to signup and edit details'),
-                    onPressed: _isLoading
-                        ? null
-                        : () async {
-                            setState(() => _isLoading = true);
-                            try {
-                              await _auth.signOut();
-                              if (!mounted) return;
-                              Navigator.of(context).pushAndRemoveUntil(
-                                MaterialPageRoute(builder: (_) => const SignupScreen()),
-                                (route) => false,
-                              );
-                            } catch (e) {
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Error: ${e.toString()}')),
-                                );
-                              }
-                            } finally {
-                              if (mounted) setState(() => _isLoading = false);
-                            }
-                          },
-                    style: TextButton.styleFrom(foregroundColor: Colors.red),
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'This page will automatically redirect you once your email is verified. You can also manually check by tapping "Check Again" below.',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: AppColors.getTextSecondaryColor(isDark),
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 32),
-                  ElevatedButton.icon(
-                    onPressed: _isLoading ? null : _resendEmail,
-                    icon: _isLoading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.refresh),
-                    label: const Text('Resend Email'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  ElevatedButton.icon(
-                    onPressed: _isLoading ? null : _manualCheck,
-                    icon: _isLoading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.check_circle_outline),
-                    label: const Text('Check Again'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextButton(
-                    onPressed: _contactSupport,
-                    child: const Text('Contact Support via WhatsApp'),
-                    style: TextButton.styleFrom(foregroundColor: AppColors.primary),
-                  ),
-                ] else ...[
-                  const SizedBox(height: 24),
-                  const CircularProgressIndicator(),
-                ],
+    return Scaffold(
+      backgroundColor: AppColors.getBackgroundColor(isDark),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(color: (_isVerified ? Colors.green : AppColors.primary).withOpacity(0.1), shape: BoxShape.circle),
+                child: Icon(_isVerified ? Icons.check_circle_rounded : Icons.email_outlined, size: 80, color: _isVerified ? Colors.green : AppColors.primary),
+              ),
+              const SizedBox(height: 32),
+              Text(_isVerified ? 'Email Verified!' : 'Verify Your Email', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+              const SizedBox(height: 16),
+              Text(_isVerified ? 'Redirecting you to the next step...' : 'A verification link has been sent to ${currentUser.email}. Please check your inbox.', textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, color: Colors.grey)),
+              if (!_isVerified) ...[
+                const SizedBox(height: 48),
+                CustomButton(text: 'Resend Verification Email', onPressed: _isLoading ? null : _resendEmail, isFullWidth: true),
+                const SizedBox(height: 12),
+                CustomButton(text: 'I\'ve Verified, Check Again', onPressed: _isLoading ? null : _manualCheck, isFullWidth: true, isOutlined: true),
+                const SizedBox(height: 24),
+                TextButton(onPressed: _contactSupport, child: const Text('Contact Support via WhatsApp', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.primaryDark))),
+                TextButton(onPressed: () => _auth.signOut().then((_) => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const SignupScreen()))), child: const Text('Cancel and Try Again', style: TextStyle(color: Colors.red))),
               ],
-            ),
+            ],
           ),
         ),
       ),

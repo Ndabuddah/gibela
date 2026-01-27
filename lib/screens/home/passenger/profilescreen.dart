@@ -14,6 +14,9 @@ import '../../../services/auth_service.dart';
 import '../../../services/clodinaryservice.dart';
 import '../../../widgets/common/modern_alert_dialog.dart';
 import '../../../widgets/common/referral_card.dart';
+import '../../settings/notifications_settings_screen.dart';
+import '../../settings/privacy_settings_screen.dart';
+import '../../help/help_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -561,8 +564,11 @@ class _SettingsSection extends StatelessWidget {
           title: 'Notifications',
           subtitle: 'Manage notification preferences',
           onTap: () {
-            // TODO: Implement notifications settings
-            ModernSnackBar.show(context, message: 'Notifications settings coming soon!');
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => const NotificationsSettingsScreen(),
+              ),
+            );
           },
           isDark: isDark,
         ),
@@ -572,8 +578,11 @@ class _SettingsSection extends StatelessWidget {
           title: 'Privacy & Security',
           subtitle: 'Manage your privacy settings',
           onTap: () {
-            // TODO: Implement privacy settings
-            ModernSnackBar.show(context, message: 'Privacy settings coming soon!');
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => const PrivacySettingsScreen(),
+              ),
+            );
           },
           isDark: isDark,
         ),
@@ -583,8 +592,11 @@ class _SettingsSection extends StatelessWidget {
           title: 'Help & Support',
           subtitle: 'Get help and contact support',
           onTap: () {
-            // TODO: Implement help and support
-            ModernSnackBar.show(context, message: 'Help & support coming soon!');
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => const HelpScreen(),
+              ),
+            );
           },
           isDark: isDark,
         ),

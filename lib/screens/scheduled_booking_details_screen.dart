@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../constants/app_colors.dart';
 import '../models/driver_model.dart';
@@ -678,9 +679,45 @@ class _ScheduledBookingDetailsScreenState extends State<ScheduledBookingDetailsS
     }
   }
 
-  void _callContact(String phoneNumber) {
-    // Implement phone call functionality
-    ModernSnackBar.show(context, message: 'Calling $phoneNumber...');
+  Future<void> _callContact(String phoneNumber) async {
+    if (phoneNumber.isEmpty || phoneNumber == 'Unknown') {
+      ModernSnackBar.show(context, message: 'Phone number not available', isError: true);
+      return;
+    }
+
+    // Remove any non-digit characters except +
+    final cleanedNumber = phoneNumber.replaceAll(RegExp(r'[^\d+]'), '');
+    
+    // Ensure the number starts with + or add country code if needed
+    String phoneUrl;
+    if (cleanedNumber.startsWith('+')) {
+      phoneUrl = 'tel:$cleanedNumber';
+    } else if (cleanedNumber.startsWith('0')) {
+      // Replace leading 0 with +27 for South Africa
+      phoneUrl = 'tel:+27${cleanedNumber.substring(1)}';
+    } else {
+      // Assume it's a local number, add +27
+      phoneUrl = 'tel:+27$cleanedNumber';
+    }
+
+    try {
+      final uri = Uri.parse(phoneUrl);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      } else {
+        ModernSnackBar.show(
+          context,
+          message: 'Cannot make phone call. Please check your device settings.',
+          isError: true,
+        );
+      }
+    } catch (e) {
+      ModernSnackBar.show(
+        context,
+        message: 'Error making phone call: $e',
+        isError: true,
+      );
+    }
   }
 
   void _startTrip() {

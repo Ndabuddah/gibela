@@ -9,6 +9,7 @@ import '../../../constants/app_colors.dart';
 import '../../../models/user_model.dart';
 import '../../../models/driver_model.dart';
 import '../../../services/database_service.dart';
+import '../../../services/location_service.dart';
 import '../../../widgets/common/loading_indicator.dart';
 import '../../../widgets/common/modern_alert_dialog.dart';
 import '../../../widgets/common/rating_dialog.dart';
@@ -46,9 +47,11 @@ class _ScheduledBookingTripScreenState extends State<ScheduledBookingTripScreen>
   // Timer variables
   Timer? _waitingTimer;
   Timer? _chargingTimer;
+  Timer? _locationUpdateTimer; // Continuous location updates during active ride
   int _waitingSeconds = 120; // 2 minutes in seconds
   int _extraWaitingSeconds = 0;
   double _waitingCharge = 0.0;
+  DateTime? _arrivalTime; // Track when driver arrived for accurate countdown
 
   // Animation controller
   late final AnimationController _animationController;
@@ -58,6 +61,7 @@ class _ScheduledBookingTripScreenState extends State<ScheduledBookingTripScreen>
     super.initState();
     _animationController = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
     _loadPassenger();
+    _startContinuousLocationUpdates(); // Start location tracking immediately
     _animationController.forward();
   }
 
@@ -65,8 +69,38 @@ class _ScheduledBookingTripScreenState extends State<ScheduledBookingTripScreen>
   void dispose() {
     _waitingTimer?.cancel();
     _chargingTimer?.cancel();
+    _locationUpdateTimer?.cancel();
     _animationController.dispose();
     super.dispose();
+  }
+  
+  // Start continuous location updates during active ride
+  void _startContinuousLocationUpdates() {
+    _locationUpdateTimer?.cancel();
+    _locationUpdateTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      
+      try {
+        final locationService = LocationService();
+        final position = await locationService.refreshCurrentLocation();
+        if (position != null) {
+          final driverId = FirebaseAuth.instance.currentUser?.uid;
+          if (driverId != null) {
+            await _databaseService.updateDriverLocation(
+              driverId,
+              position.latitude,
+              position.longitude,
+            );
+          }
+        }
+      } catch (e) {
+        print('Error updating driver location: $e');
+        // Continue trying even if one update fails
+      }
+    });
   }
 
   Future<void> _loadPassenger() async {
@@ -116,19 +150,30 @@ class _ScheduledBookingTripScreenState extends State<ScheduledBookingTripScreen>
     }
   }
 
-  // Mark as arrived at pickup
+  // Mark as arrived at pickup (transaction-safe and accurate)
   Future<void> _markAsArrived() async {
+    // Prevent multiple calls
+    if (_hasArrived) {
+      return;
+    }
+    
     setState(() {
       _hasArrived = true;
       _isLoading = true;
+      _waitingSeconds = 120; // Reset to 2 minutes
+      _extraWaitingSeconds = 0;
+      _waitingCharge = 0.0;
     });
 
     try {
-      // Update scheduled request status
+      // Update scheduled request status (transaction-safe)
       await _databaseService.updateScheduledRequestStatus(widget.scheduledRequest['id'], 'driver_arrived');
 
-      // Start the 2-minute timer
+      // Cancel any existing timers
       _waitingTimer?.cancel();
+      _chargingTimer?.cancel();
+
+      // Start the 2-minute free waiting timer (accurate countdown)
       _waitingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (!mounted) {
           timer.cancel();
@@ -140,7 +185,7 @@ class _ScheduledBookingTripScreenState extends State<ScheduledBookingTripScreen>
           } else {
             _waitingTimer?.cancel();
             _flowState = ScheduledTripFlowState.waitingForPassenger;
-            _startChargingTimer();
+            _startChargingTimer(); // Start charging after free time expires
           }
         });
       });
@@ -150,10 +195,17 @@ class _ScheduledBookingTripScreenState extends State<ScheduledBookingTripScreen>
 
       setState(() => _isLoading = false);
 
-      ModernSnackBar.show(context, message: 'Arrival marked! 2-minute free waiting time started');
+      if (mounted) {
+        ModernSnackBar.show(context, message: 'Arrival marked! 2-minute free waiting time started');
+      }
     } catch (e) {
-      setState(() => _isLoading = false);
-      ModernSnackBar.show(context, message: 'Error marking arrival: $e', isError: true);
+      setState(() {
+        _isLoading = false;
+        _hasArrived = false; // Reset on error
+      });
+      if (mounted) {
+        ModernSnackBar.show(context, message: 'Error marking arrival: $e', isError: true);
+      }
     }
   }
 
@@ -300,14 +352,16 @@ class _ScheduledBookingTripScreenState extends State<ScheduledBookingTripScreen>
   // Helper methods
   void _startChargingTimer() {
     _chargingTimer?.cancel();
-    _chargingTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
+    // Use seconds-based timer for more accurate charging (R1 per minute = R0.0167 per second)
+    _chargingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
         timer.cancel();
         return;
       }
       setState(() {
-        _extraWaitingSeconds += 60;
-        _waitingCharge += 1.0;
+        _extraWaitingSeconds++;
+        // Charge R1 per minute = R0.0167 per second (rounded to 2 decimals)
+        _waitingCharge = (_extraWaitingSeconds / 60.0);
       });
     });
   }

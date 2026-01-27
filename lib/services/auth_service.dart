@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../models/user_model.dart';
 import 'database_service.dart';
+import 'logging_service.dart';
 
 class AuthService extends ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -167,18 +168,18 @@ class AuthService extends ChangeNotifier {
   // Add missing methods for compatibility
   Future<UserCredential> signInWithEmailAndPassword(String email, String password) async {
     try {
-      print('🔐 AuthService: Starting sign in for email: $email');
-      print('🔐 AuthService: Checking Firebase Auth instance...');
-      print('🔐 AuthService: Firebase Auth initialized: ${_auth.app != null}');
+      logger.debug('AuthService: Starting sign in for email: $email');
+      logger.debug('AuthService: Checking Firebase Auth instance...');
+      logger.debug('AuthService: Firebase Auth initialized: ${_auth.app != null}');
       
       final userCredential = await _auth.signInWithEmailAndPassword(email: email, password: password);
-      print('✅ AuthService: Sign in successful for user: ${userCredential.user?.uid}');
+      logger.info('AuthService: Sign in successful for user: ${userCredential.user?.uid}');
       return userCredential;
     } on FirebaseAuthException catch (e) {
-      print('❌ AuthService: FirebaseAuthException - Code: ${e.code}, Message: ${e.message}');
+      logger.error('AuthService: FirebaseAuthException - Code: ${e.code}, Message: ${e.message}', error: e);
       rethrow;
     } catch (e) {
-      print('❌ AuthService: General error during sign in: $e');
+      logger.error('AuthService: General error during sign in', error: e);
       rethrow;
     }
   }
@@ -192,10 +193,10 @@ class AuthService extends ChangeNotifier {
         password: password,
       );
     } on FirebaseAuthException catch (e) {
-      print('FirebaseAuthException:  [31m${e.code} [0m - ${e.message}');
+      logger.error('FirebaseAuthException: ${e.code} - ${e.message}', error: e);
       rethrow;
     } catch (e) {
-      print('General auth error: $e');
+      logger.error('General auth error', error: e);
       rethrow;
     }
   }

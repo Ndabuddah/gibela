@@ -8,11 +8,13 @@ import 'package:gibelbibela/models/ride_model.dart';
 import 'package:gibelbibela/services/chat_service.dart';
 import 'package:gibelbibela/services/database_service.dart';
 import 'package:gibelbibela/services/ride_service.dart';
+import 'package:gibelbibela/services/location_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // import 'package:rideapp/utils/constants.dart'; // Removed: file does not exist
 
 import '../../../constants/app_colors.dart';
+import '../../../constants/app_theme.dart';
 import '../../../models/user_model.dart';
 import '../../../widgets/common/cancellation_dialog.dart';
 import '../../../widgets/common/loading_indicator.dart';
@@ -56,12 +58,17 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
   // Timer variables
   Timer? _waitingTimer;
   Timer? _chargingTimer;
+  Timer? _locationUpdateTimer; // Continuous location updates during active ride
   int _waitingSeconds = 120; // 2 minutes in seconds
   int _extraWaitingSeconds = 0;
   double _waitingCharge = 0.0;
+  DateTime? _arrivalTime; // Track when driver arrived for accurate countdown
 
   // Animation controller for UI effects
   late final AnimationController _animationController;
+  
+  // Location service for continuous updates
+  final LocationService _locationService = LocationService();
 
   @override
   void initState() {
@@ -72,6 +79,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
     );
     _loadPassenger();
     _initializeFlowState();
+    _startContinuousLocationUpdates(); // Start location tracking immediately
     _animationController.forward();
   }
 
@@ -79,8 +87,37 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
   void dispose() {
     _waitingTimer?.cancel();
     _chargingTimer?.cancel();
+    _locationUpdateTimer?.cancel();
     _animationController.dispose();
     super.dispose();
+  }
+  
+  // Start continuous location updates every 5 seconds during active ride
+  void _startContinuousLocationUpdates() {
+    _locationUpdateTimer?.cancel();
+    _locationUpdateTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      
+      try {
+        final position = await _locationService.refreshCurrentLocation();
+        if (position != null) {
+          final driverId = FirebaseAuth.instance.currentUser?.uid;
+          if (driverId != null) {
+            await _firestoreService.updateDriverLocation(
+              driverId,
+              position.latitude,
+              position.longitude,
+            );
+          }
+        }
+      } catch (e) {
+        print('Error updating driver location: $e');
+        // Continue trying even if one update fails
+      }
+    });
   }
 
   Future<void> _loadPassenger() async {
@@ -980,14 +1017,16 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
 
   void _startChargingTimer() {
     _chargingTimer?.cancel();
-    _chargingTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
+    // Use seconds-based timer for more accurate charging (R1 per minute = R0.0167 per second)
+    _chargingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
         timer.cancel();
         return;
       }
       setState(() {
-        _extraWaitingSeconds += 60;
-        _waitingCharge += 1.0;
+        _extraWaitingSeconds++;
+        // Charge R1 per minute = R0.0167 per second (rounded to 2 decimals)
+        _waitingCharge = (_extraWaitingSeconds / 60.0);
       });
     });
   }
@@ -1001,6 +1040,13 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
       case RideStatus.driverArrived:
         _flowState = RideFlowState.arrivedAtPickup;
         _hasNavigatedToPickup = true;
+        _hasArrived = true;
+        // Restore countdown if driver already arrived (e.g., after app restart)
+        // Only start timer if not already running
+        if (_waitingTimer == null) {
+          _waitingSeconds = 120; // Reset to full 2 minutes
+          _startWaitingTimer();
+        }
         break;
       case RideStatus.inProgress:
         _flowState = RideFlowState.inProgress;
@@ -1038,12 +1084,24 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
   }
 
   void _markAsArrived() async {
+    // Prevent multiple calls
+    if (_hasArrived) {
+      return;
+    }
+    
     setState(() {
       _hasArrived = true;
+      _arrivalTime = DateTime.now(); // Record exact arrival time
+      _waitingSeconds = 120; // Reset to 2 minutes
+      _extraWaitingSeconds = 0;
+      _waitingCharge = 0.0;
     });
 
-    // Start the 2-minute timer
-    _waitingTimer?.cancel(); // Cancel any existing timer
+    // Cancel any existing timers
+    _waitingTimer?.cancel();
+    _chargingTimer?.cancel();
+
+    // Start the 2-minute free waiting timer (accurate countdown)
     _waitingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
         timer.cancel();
@@ -1054,20 +1112,41 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> with TickerProvider
           _waitingSeconds--;
         } else {
           _waitingTimer?.cancel();
-          _startChargingTimer();
+          _startChargingTimer(); // Start charging after free time expires
         }
       });
     });
 
-    // Update ride status and notify passenger
+    // Update ride status and notify passenger (transaction-safe)
     try {
-      final updatedRide = widget.ride.copyWith(
-        status: RideStatus.driverArrived,
-      );
-      await _firestoreService.updateRide(updatedRide);
+      final rideService = RideService();
+      await rideService.driverArrived(widget.ride.id);
+      
+      // Send additional arrival notification
       _sendArrivalNotification();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Arrival marked! 2-minute free waiting time started'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     } catch (e) {
       print('Error updating ride status: $e');
+      if (mounted) {
+        setState(() {
+          _hasArrived = false; // Reset on error
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error marking arrival: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 

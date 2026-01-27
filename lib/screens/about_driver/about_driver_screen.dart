@@ -38,17 +38,17 @@ class AboutDriverScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      '• R450 per week will be deducted from your earnings as a platform fee.',
+                      '• Registration is currently free for all new drivers.',
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
                     ),
                     const SizedBox(height: 12),
                     const Text(
-                      '• All weekly earnings (after the R450 fee) will be paid out to you every Sunday.',
+                      '• All your weekly earnings will be paid out to you every Sunday.',
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
                     ),
                     const SizedBox(height: 12),
                     const Text(
-                      '• For any questions or support, contact us on WhatsApp.',
+                      '• We don\'t charge any registration fees or hidden platform fees.',
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
                     ),
                     const SizedBox(height: 18),
@@ -79,7 +79,7 @@ class AboutDriverScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 32),
-            const Text(
+            Text(
               'Thank you for being a valued driver on our platform! We are committed to your success and support.',
               style: TextStyle(fontSize: 16, color: AppColors.textDark, fontWeight: FontWeight.w500),
             ),

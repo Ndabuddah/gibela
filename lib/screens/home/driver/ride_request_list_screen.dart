@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as latlong2;
@@ -46,8 +47,8 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
     _loadCurrentDriver();
     // Proactively clean up abandoned (stale) pending requests so drivers don't see them
     DatabaseService().cleanupAbandonedRequests();
-    // Refresh location every 30 seconds to ensure accurate filtering
-    Timer.periodic(const Duration(seconds: 30), (timer) {
+    // Refresh location every 15 seconds to ensure accurate filtering and real-time updates
+    Timer.periodic(const Duration(seconds: 15), (timer) {
       if (mounted) {
         _loadLocation();
       } else {
@@ -72,9 +73,19 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
         final profileImage = userData['profileImage'] as String?;
         
         if (profileImage == null || profileImage.isEmpty) {
-          // Show profile picture prompt
-          if (mounted) {
-            _showProfilePicturePrompt();
+          // Check if we've shown this dialog recently (within last 24 hours)
+          final prefs = await SharedPreferences.getInstance();
+          final lastShown = prefs.getInt('profile_picture_dialog_last_shown_${user.uid}') ?? 0;
+          final now = DateTime.now().millisecondsSinceEpoch;
+          final oneDayInMs = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+          
+          // Only show if it's been more than 24 hours since last shown
+          if (now - lastShown > oneDayInMs) {
+            if (mounted) {
+              _showProfilePicturePrompt();
+              // Update last shown timestamp
+              await prefs.setInt('profile_picture_dialog_last_shown_${user.uid}', now);
+            }
           }
         }
       }
@@ -86,25 +97,34 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
   void _showProfilePicturePrompt() {
     showDialog(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: true, // Allow dismissing by tapping outside
       builder: (context) => AlertDialog(
         title: const Row(
           children: [
             Icon(Icons.camera_alt, color: AppColors.primary),
             SizedBox(width: 8),
-            Text('Profile Picture Required'),
+            Text('Profile Picture Recommended'),
           ],
         ),
         content: const Text(
-          'You need to add a profile picture to view ride requests. This helps passengers identify you.',
+          'Adding a profile picture helps passengers identify you and builds trust. You can add one now or skip for later.',
         ),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.of(context).pop();
+            },
+            child: const Text('Skip for Now'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
               _navigateToProfilePicture();
             },
-            child: const Text('Take Photo Now'),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.primary,
+            ),
+            child: const Text('Add Photo'),
           ),
         ],
       ),
@@ -217,14 +237,35 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
         _currentLatLng = latlong2.LatLng(pos.latitude, pos.longitude);
       });
       
-      // Debug logging for location
-      print('📍 Driver location updated: ${pos.latitude}, ${pos.longitude}');
+      // Save location to Firestore for passenger tracking and accurate matching
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final user = authService.userModel;
+      if (user != null) {
+        try {
+          final dbService = DatabaseService();
+          await dbService.updateDriverLocation(user.uid, pos.latitude, pos.longitude);
+          print('📍 Driver location saved to Firestore: ${pos.latitude}, ${pos.longitude}');
+        } catch (e) {
+          print('⚠️ Failed to save driver location to Firestore: $e');
+          // Continue with local location for filtering even if Firestore update fails
+        }
+      }
     } else {
-      // Default to Johannesburg if location not available
-      setState(() {
-        _currentLatLng = latlong2.LatLng(-26.2041, 28.0473);
-      });
-      print('⚠️ Using default Johannesburg location');
+      // Don't use default location for matching - it would cause incorrect results
+      // Only set default if we really need it for UI purposes, but don't use for filtering
+      print('⚠️ Location not available - cannot update driver location');
+      // Keep previous location if available, otherwise show error
+      if (_currentLatLng == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Unable to get your location. Please check location permissions.'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -285,8 +326,37 @@ class _RideRequestListScreenState extends State<RideRequestListScreen> {
   }
 
   Widget _buildFilteredRideRequests() {
-    if (_currentDriver == null || _currentLatLng == null) {
+    if (_currentDriver == null) {
       return const Center(child: CircularProgressIndicator());
+    }
+    
+    // Don't show rides if location is not available - it would cause incorrect matching
+    if (_currentLatLng == null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.location_off, size: 64, color: Colors.orange),
+            const SizedBox(height: 16),
+            const Text(
+              'Location Not Available',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Please enable location services to see ride requests.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _loadLocation,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry Location'),
+            ),
+          ],
+        ),
+      );
     }
 
     // Create a Position object for the filter service

@@ -1,11 +1,12 @@
+// lib/screens/auth/student_verification_screen.dart
 import 'dart:io';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-
 import '../../constants/app_colors.dart';
+import '../../services/clodinaryservice.dart';
+import '../../widgets/common/custom_button.dart';
 
 class StudentVerificationScreen extends StatefulWidget {
   const StudentVerificationScreen({Key? key}) : super(key: key);
@@ -22,8 +23,13 @@ class _StudentVerificationScreenState extends State<StudentVerificationScreen> {
   bool _isLoading = false;
   final ImagePicker _picker = ImagePicker();
 
+  final cloudinaryService = CloudinaryService(
+    cloudName: 'dunfw4ifc',
+    uploadPreset: 'beauti',
+  );
+
   Future<void> _pickImage(Function(File?) onSelect) async {
-    final pickedFile = await _picker.pickImage(source: ImageSource.camera);
+    final pickedFile = await _picker.pickImage(source: ImageSource.camera, imageQuality: 70);
     if (pickedFile != null) {
       setState(() {
         onSelect(File(pickedFile.path));
@@ -34,25 +40,30 @@ class _StudentVerificationScreenState extends State<StudentVerificationScreen> {
   Widget _buildPhotoTile(String label, String description, File? image, VoidCallback onTap, Color color) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color, width: 2),
+          color: image != null ? color.withOpacity(0.05) : Colors.grey.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: image != null ? color : Colors.black.withOpacity(0.05),
+            width: image != null ? 2 : 1,
+          ),
         ),
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(12),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            image != null
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.file(image, width: 70, height: 70, fit: BoxFit.cover),
-                  )
-                : Icon(Icons.add_a_photo, color: color, size: 32),
-            const SizedBox(height: 8),
-            Text(label, style: TextStyle(fontWeight: FontWeight.bold, color: color)),
-            const SizedBox(height: 6),
+            if (image != null)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.file(image, width: 80, height: 80, fit: BoxFit.cover),
+              )
+            else
+              Icon(Icons.add_a_photo_rounded, color: color.withOpacity(0.5), size: 40),
+            const SizedBox(height: 12),
+            Text(label, style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 14)),
+            const SizedBox(height: 4),
             Text(description, style: const TextStyle(fontSize: 10, color: Colors.grey), textAlign: TextAlign.center),
           ],
         ),
@@ -72,27 +83,39 @@ class _StudentVerificationScreenState extends State<StudentVerificationScreen> {
     try {
       final userId = FirebaseAuth.instance.currentUser?.uid;
       if (userId == null) throw Exception('Not logged in');
-      // TODO: Implement upload logic (e.g., Cloudinary, Firebase Storage)
-      // Save URLs and verification data in Firestore under student_verification
+
+      // Upload to Cloudinary
+      final faceUrl = await cloudinaryService.uploadImage(_faceImage!);
+      final idUrl = await cloudinaryService.uploadImage(_idImage!);
+      final studentCardUrl = await cloudinaryService.uploadImage(_studentCardImage!);
+      final faceWithIdUrl = await cloudinaryService.uploadImage(_faceWithStudentCardImage!);
+
+      if (faceUrl == null || idUrl == null || studentCardUrl == null || faceWithIdUrl == null) {
+        throw Exception('Failed to upload one or more images');
+      }
+
       await FirebaseFirestore.instance.collection('student_verification').doc(userId).set({
-        'faceImage': _faceImage!.path,
-        'idImage': _idImage!.path,
-        'studentCardImage': _studentCardImage!.path,
-        'faceWithStudentCardImage': _faceWithStudentCardImage!.path,
+        'faceImageUrl': faceUrl,
+        'idImageUrl': idUrl,
+        'studentCardImageUrl': studentCardUrl,
+        'faceWithStudentCardImageUrl': faceWithIdUrl,
         'submittedAt': FieldValue.serverTimestamp(),
         'status': 'pending',
       });
+
       if (!mounted) return;
       showDialog(
         context: context,
         barrierDismissible: false,
         builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
           title: const Text('Verification Submitted'),
-          content: const Text('Please wait for student verification. This can take up to 15 minutes.'),
+          content: const Text('Our team will verify your student status within 15 minutes. You\'ll receive a notification once it\'s done.'),
           actions: [
-            TextButton(
+            CustomButton(
+              text: 'OK', 
               onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
-              child: const Text('OK'),
+              isFullWidth: true,
             ),
           ],
         ),
@@ -108,75 +131,76 @@ class _StudentVerificationScreenState extends State<StudentVerificationScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final mainColor = AppColors.secondary;
+    final mainColor = AppColors.primary;
+    
     return Scaffold(
+      backgroundColor: AppColors.getBackgroundColor(isDark),
       appBar: AppBar(
-        title: const Text('Student Verification'),
-        backgroundColor: mainColor,
+        title: const Text('Student Verification', style: TextStyle(fontWeight: FontWeight.w900)),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
       ),
       body: Stack(
         children: [
-          Padding(
+          SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
-                  'To access AsambeStudent rides, you must verify you are a student. Please provide the following four images:',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+                  'Verify your student status to unlock AsambeStudent rides.',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: Colors.grey),
+                  textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 22),
+                const SizedBox(height: 32),
                 GridView.count(
                   crossAxisCount: 2,
                   shrinkWrap: true,
-                  mainAxisSpacing: 18,
-                  crossAxisSpacing: 18,
+                  mainAxisSpacing: 16,
+                  crossAxisSpacing: 16,
                   physics: const NeverScrollableScrollPhysics(),
                   children: [
                     _buildPhotoTile(
                       'Face',
-                      'Take a clear photo of your face.',
+                      'Clear photo of your face',
                       _faceImage,
                       () => _pickImage((img) => _faceImage = img),
                       mainColor,
                     ),
                     _buildPhotoTile(
                       'ID Card',
-                      'Take a photo of your national ID card.',
+                      'Your national ID card',
                       _idImage,
                       () => _pickImage((img) => _idImage = img),
                       mainColor,
                     ),
                     _buildPhotoTile(
                       'Student Card',
-                      'Take a photo of your valid student card.',
+                      'Valid student card',
                       _studentCardImage,
                       () => _pickImage((img) => _studentCardImage = img),
                       mainColor,
                     ),
                     _buildPhotoTile(
+                      'Verification',
                       'Face + Student Card',
-                      'face holding your student card.',
                       _faceWithStudentCardImage,
                       () => _pickImage((img) => _faceWithStudentCardImage = img),
                       mainColor,
                     ),
                   ],
                 ),
-                const SizedBox(height: 28),
-                ElevatedButton(
+                const SizedBox(height: 48),
+                CustomButton(
+                  text: 'Submit for Verification',
                   onPressed: _isLoading ? null : _submitVerification,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: mainColor,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  child: const Text('Submit for Verification'),
+                  isFullWidth: true,
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 24),
                 const Text(
-                  'Verification can take up to 15 minutes. You will be notified once approved.',
-                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                  'By submitting, you agree to our verification process.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -184,8 +208,10 @@ class _StudentVerificationScreenState extends State<StudentVerificationScreen> {
           ),
           if (_isLoading)
             Container(
-              color: Colors.black.withOpacity(0.3),
-              child: const Center(child: CircularProgressIndicator()),
+              color: Colors.black.withOpacity(0.5),
+              child: const Center(
+                child: CircularProgressIndicator(color: AppColors.primary),
+              ),
             ),
         ],
       ),

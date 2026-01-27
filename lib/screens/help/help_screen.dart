@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../constants/app_colors.dart';
+import '../../widgets/common/modern_alert_dialog.dart';
 
 class HelpScreen extends StatelessWidget {
   const HelpScreen({super.key});
@@ -121,21 +124,7 @@ class HelpScreen extends StatelessWidget {
                       const SizedBox(height: 32),
                       Center(
                         child: ElevatedButton.icon(
-                          onPressed: () {
-                            showDialog(
-                              context: context,
-                              builder: (context) => AlertDialog(
-                                title: const Text('Submit a Support Ticket'),
-                                content: const Text('Support ticket submission coming soon!'),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.of(context).pop(),
-                                    child: const Text('OK'),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
+                          onPressed: () => _showSupportTicketDialog(context),
                           icon: const Icon(Icons.support_agent),
                           label: const Text('Submit a Support Ticket'),
                           style: ElevatedButton.styleFrom(
@@ -220,6 +209,110 @@ class HelpScreen extends StatelessWidget {
   static void _showError(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
+    );
+  }
+
+  void _showSupportTicketDialog(BuildContext context) {
+    final subjectController = TextEditingController();
+    final messageController = TextEditingController();
+    String selectedCategory = 'general';
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Submit Support Ticket'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String>(
+                value: selectedCategory,
+                decoration: const InputDecoration(
+                  labelText: 'Category',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'general', child: Text('General')),
+                  DropdownMenuItem(value: 'technical', child: Text('Technical Issue')),
+                  DropdownMenuItem(value: 'payment', child: Text('Payment Issue')),
+                  DropdownMenuItem(value: 'safety', child: Text('Safety Concern')),
+                  DropdownMenuItem(value: 'other', child: Text('Other')),
+                ],
+                onChanged: (value) {
+                  selectedCategory = value ?? 'general';
+                },
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: subjectController,
+                decoration: const InputDecoration(
+                  labelText: 'Subject',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: messageController,
+                decoration: const InputDecoration(
+                  labelText: 'Message',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 5,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (subjectController.text.isEmpty || messageController.text.isEmpty) {
+                ModernSnackBar.show(
+                  context,
+                  message: 'Please fill in all fields',
+                  isError: true,
+                );
+                return;
+              }
+
+              try {
+                final user = FirebaseAuth.instance.currentUser;
+                if (user != null) {
+                  await FirebaseFirestore.instance.collection('support_tickets').add({
+                    'userId': user.uid,
+                    'category': selectedCategory,
+                    'subject': subjectController.text,
+                    'message': messageController.text,
+                    'status': 'open',
+                    'createdAt': FieldValue.serverTimestamp(),
+                  });
+
+                  if (context.mounted) {
+                    Navigator.of(context).pop();
+                    ModernSnackBar.show(
+                      context,
+                      message: 'Support ticket submitted successfully! We\'ll get back to you soon.',
+                      isSuccess: true,
+                    );
+                  }
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ModernSnackBar.show(
+                    context,
+                    message: 'Failed to submit ticket: $e',
+                    isError: true,
+                  );
+                }
+              }
+            },
+            child: const Text('Submit'),
+          ),
+        ],
+      ),
     );
   }
 } 

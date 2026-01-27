@@ -26,7 +26,7 @@ class CongratulationsScreen extends StatelessWidget {
                 fit: BoxFit.fill,
               ),
               const SizedBox(height: 32),
-              const Text(
+              Text(
                 'Congratulations!',
                 style: TextStyle(
                   fontSize: 28,

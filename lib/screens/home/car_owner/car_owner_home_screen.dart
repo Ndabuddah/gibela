@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:ui';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../constants/app_colors.dart';
 import '../../../models/user_model.dart';
@@ -40,10 +41,23 @@ class _CarOwnerHomeScreenState extends State<CarOwnerHomeScreen> {
     });
   }
 
-  void _showFeatureAlert() {
+  Future<void> _showFeatureAlert() async {
+    // Check if we've shown this dialog before (within last 7 days)
+    final prefs = await SharedPreferences.getInstance();
+    final lastShown = prefs.getInt('car_owner_alert_last_shown') ?? 0;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final sevenDaysInMs = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+    
+    // Only show if it's been more than 7 days since last shown
+    if (now - lastShown < sevenDaysInMs) {
+      return; // Don't show the dialog
+    }
+    
+    if (!mounted) return;
+    
     showDialog(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: true, // Allow dismissing by tapping outside
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
@@ -70,7 +84,11 @@ class _CarOwnerHomeScreenState extends State<CarOwnerHomeScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () {
+              Navigator.of(context).pop();
+              // Save the timestamp when dialog is dismissed
+              prefs.setInt('car_owner_alert_last_shown', now);
+            },
             child: const Text('Got it!'),
           ),
         ],
@@ -83,11 +101,8 @@ class _CarOwnerHomeScreenState extends State<CarOwnerHomeScreen> {
     try {
       final databaseService = Provider.of<DatabaseService>(context, listen: false);
       
-      // Use mock data for now
-      final applications = await databaseService.getMockDriverApplications();
-      
-      // Load owner's vehicles (using mock data for now)
-      final vehicles = await databaseService.getMockVehicleOffers();
+      final applications = await databaseService.getNoCarApplications();
+      final vehicles = await databaseService.getVehicleOffersByOwner(widget.userModel.uid);
 
       setState(() {
         _driverApplications = applications;
@@ -107,24 +122,48 @@ class _CarOwnerHomeScreenState extends State<CarOwnerHomeScreen> {
     }
   }
 
-  void _onApplicationAccepted(Map<String, dynamic> application) {
-    // TODO: Implement application acceptance logic
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Application accepted! Contacting ${application['name']}...'),
-        backgroundColor: Colors.green,
-      ),
-    );
+  void _onApplicationAccepted(Map<String, dynamic> application) async {
+    final databaseService = Provider.of<DatabaseService>(context, listen: false);
+    try {
+      await databaseService.updateNoCarApplicationStatus(application['id'], 'accepted');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Application accepted! Contacting ${application['name']}...'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        _loadData();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error accepting application: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
-  void _onApplicationRejected(Map<String, dynamic> application) {
-    // TODO: Implement application rejection logic
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Application rejected'),
-        backgroundColor: Colors.orange,
-      ),
-    );
+  void _onApplicationRejected(Map<String, dynamic> application) async {
+    final databaseService = Provider.of<DatabaseService>(context, listen: false);
+    try {
+      await databaseService.updateNoCarApplicationStatus(application['id'], 'rejected');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Application rejected'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        _loadData();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error rejecting application: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   void _onViewApplicationDetails(Map<String, dynamic> application) {

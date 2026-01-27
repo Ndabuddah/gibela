@@ -151,31 +151,9 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
           return;
         }
 
-        print('✅ Driver signup completed, checking payment and status...');
+        print('✅ Driver signup completed, checking status...');
         final driverAccessService = DriverAccessService();
         final accessCheck = await driverAccessService.checkDriverAccess(userModel.uid);
-
-        // If payment is required after signup
-        if (accessCheck['status'] == 'payment_required') {
-          print('💰 Payment required');
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (_) => PaymentScreen(
-                amount: 150.00,  // Driver registration fee
-                email: userModel?.email ?? '',
-                onPaymentSuccess: () {
-                  // After successful payment, navigate to driver home
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(
-                      builder: (_) => const DriverHomeScreen(),
-                    ),
-                  );
-                },
-              ),
-            ),
-          );
-          return;
-        }
 
         // Driver can access home screen
         await dbService.setUserOnlineStatus(userModel.uid, true);

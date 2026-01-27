@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'dart:ui';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../constants/app_colors.dart';
 import '../../../models/user_model.dart';
 import '../../../providers/theme_provider.dart';
 import '../../../services/database_service.dart';
+import '../../../widgets/common/custom_button.dart';
 import '../../../widgets/common/modern_drawer.dart';
 import '../../../widgets/common/loading_indicator.dart';
 import 'vehicle_offer_card.dart';
@@ -59,10 +61,23 @@ class _DriverNoCarHomeScreenState extends State<DriverNoCarHomeScreen> {
     });
   }
 
-  void _showFeatureAlert() {
+  Future<void> _showFeatureAlert() async {
+    // Check if we've shown this dialog before (within last 7 days)
+    final prefs = await SharedPreferences.getInstance();
+    final lastShown = prefs.getInt('driver_no_car_alert_last_shown') ?? 0;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final sevenDaysInMs = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+    
+    // Only show if it's been more than 7 days since last shown
+    if (now - lastShown < sevenDaysInMs) {
+      return; // Don't show the dialog
+    }
+    
+    if (!mounted) return;
+    
     showDialog(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: true, // Allow dismissing by tapping outside
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
@@ -89,7 +104,11 @@ class _DriverNoCarHomeScreenState extends State<DriverNoCarHomeScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () {
+              Navigator.of(context).pop();
+              // Save the timestamp when dialog is dismissed
+              prefs.setInt('driver_no_car_alert_last_shown', now);
+            },
             child: const Text('Got it!'),
           ),
         ],
@@ -102,8 +121,7 @@ class _DriverNoCarHomeScreenState extends State<DriverNoCarHomeScreen> {
     try {
       final databaseService = Provider.of<DatabaseService>(context, listen: false);
       
-      // Use mock data for now
-      final offers = await databaseService.getMockVehicleOffers();
+      final offers = await databaseService.getVehicleOffers();
       
       setState(() {
         _allOffers = offers;
@@ -181,41 +199,45 @@ class _DriverNoCarHomeScreenState extends State<DriverNoCarHomeScreen> {
     );
   }
 
-  void _processOfferAcceptance(Map<String, dynamic> offer) {
-    // Remove the offer from the list
-    setState(() {
-      _allOffers.removeWhere((o) => o['id'] == offer['id']);
-      _filterOffers();
-    });
-
-    // Show success message
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(Icons.check_circle, color: Colors.white),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Offer accepted! Contacting ${offer['ownerName']}...',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
+  void _processOfferAcceptance(Map<String, dynamic> offer) async {
+    setState(() => _isLoading = true);
+    try {
+      final databaseService = Provider.of<DatabaseService>(context, listen: false);
+      await databaseService.updateVehicleOfferStatus(offer['id'], 'accepted');
+      
+      if (mounted) {
+        setState(() => _isLoading = false);
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Row(
+              children: [
+                Icon(Icons.celebration, color: AppColors.primary, size: 28),
+                const SizedBox(width: 12),
+                const Text('Offer Accepted!'),
+              ],
             ),
-          ],
-        ),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        duration: const Duration(seconds: 4),
-        action: SnackBarAction(
-          label: 'View Details',
-          textColor: Colors.white,
-          onPressed: () {
-            // TODO: Navigate to offer details or chat screen
-          },
-        ),
-      ),
-    );
+            content: Text('Your interest has been sent to ${offer['ownerName']}. They will contact you shortly to finalize the arrangements.'),
+            actions: [
+              CustomButton(
+                text: 'Great!',
+                onPressed: () => Navigator.of(context).pop(),
+                isFullWidth: true,
+              ),
+            ],
+          ),
+        );
+        _loadVehicleOffers();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   void _onOfferRejected(Map<String, dynamic> offer) {

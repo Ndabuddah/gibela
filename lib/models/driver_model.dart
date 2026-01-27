@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 enum DriverStatus { offline, online, onRide }
 
 enum PaymentModel { weekly, percentage }
@@ -85,7 +87,18 @@ class DriverModel {
 
     // Convert document expiry dates
     final expiryDates = (data['documentExpiryDates'] as Map<String, dynamic>?)?.map(
-          (key, value) => MapEntry(key, DateTime.parse(value as String)),
+          (key, value) {
+            if (value is String) {
+              try {
+                return MapEntry(key, DateTime.parse(value));
+              } catch (e) {
+                return MapEntry(key, DateTime.now());
+              }
+            } else if (value is Timestamp) {
+              return MapEntry(key, value.toDate());
+            }
+            return MapEntry(key, DateTime.now());
+          },
         ) ?? {};
 
     // Convert service area preferences
@@ -110,12 +123,16 @@ class DriverModel {
       vehicleModel: data['vehicleModel'],
       vehicleColor: data['vehicleColor'],
       licensePlate: data['licensePlate'],
-      status: DriverStatus.values.asMap().containsKey(data['status'])
-          ? DriverStatus.values[data['status']]
-          : DriverStatus.offline,
-      averageRating: (data['averageRating'] ?? 0.0).toDouble(),
-      totalRides: data['totalRides'] ?? 0,
-      totalEarnings: data['totalEarnings'] ?? 0,
+      status: (() {
+        final statusValue = (data['status'] as num?)?.toInt();
+        if (statusValue != null && DriverStatus.values.asMap().containsKey(statusValue)) {
+          return DriverStatus.values[statusValue];
+        }
+        return DriverStatus.offline;
+      })(),
+      averageRating: ((data['averageRating'] ?? 0) as num).toDouble(),
+      totalRides: ((data['totalRides'] ?? 0) as num).toInt(),
+      totalEarnings: ((data['totalEarnings'] ?? 0) as num).toInt(),
       isApproved: data['isApproved'] ?? false,
       profileImage: data['profileImage'],
       isFemale: data['IsFemale'],
@@ -124,11 +141,29 @@ class DriverModel {
       isMax2: data['isMax2'] ?? false,
       vehiclePurposes: (data['vehiclePurposes'] as List<dynamic>?)?.cast<String>() ?? [],
       payLater: data['payLater'] ?? false,
-      paymentModel: PaymentModel.values.asMap().containsKey(data['paymentModel'])
-          ? PaymentModel.values[data['paymentModel']]
-          : PaymentModel.weekly,
+      paymentModel: (() {
+        final paymentModelValue = (data['paymentModel'] as num?)?.toInt();
+        if (paymentModelValue != null && PaymentModel.values.asMap().containsKey(paymentModelValue)) {
+          return PaymentModel.values[paymentModelValue];
+        }
+        return PaymentModel.weekly;
+      })(),
       isPaid: data['isPaid'] ?? false,
-      lastPaymentModelChange: data['lastPaymentModelChange'] != null ? DateTime.parse(data['lastPaymentModelChange'] as String) : null,
+      lastPaymentModelChange: (() {
+        final changeDate = data['lastPaymentModelChange'];
+        if (changeDate == null) return null;
+        if (changeDate is String) {
+          try {
+            return DateTime.parse(changeDate);
+          } catch (e) {
+            return null;
+          }
+        }
+        if (changeDate is Timestamp) {
+          return changeDate.toDate();
+        }
+        return null;
+      })(),
       documentVerificationStatus: verificationStatus,
       documentExpiryDates: expiryDates,
       vehicleInformation: data['vehicleInformation'] as Map<String, dynamic>? ?? {},

@@ -181,30 +181,6 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
             return;
           }
 
-          // If payment is required, redirect to payment
-          if (accessCheck['status'] == 'payment_required') {
-            print('💰 Payment required, redirecting...');
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => PaymentScreen(
-                  amount: 150.00,  // Driver registration fee
-                  email: userModel.email,
-                  onPaymentSuccess: () {
-                    // After successful payment, navigate to driver signup to complete profile
-                    Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(
-                        builder: (_) => const DriverSignupScreen(),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            );
-            return;
-          }
-
-
-
           // Drivers can access the app (approved or awaiting approval)
           print('✅ Driver going to home screen');
           print('- Can Access: ${accessCheck['canAccess']}');
