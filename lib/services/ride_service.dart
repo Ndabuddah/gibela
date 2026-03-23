@@ -11,12 +11,14 @@ import '../services/notification_service.dart';
 import '../services/ride_notification_service.dart';
 import 'database_service.dart';
 import 'location_service.dart';
+import 'auto_assignment_service.dart';
 // Removed: import 'mapbox_service.dart';
 
 class RideService extends ChangeNotifier {
   final DatabaseService _databaseService = DatabaseService();
   final LocationService _locationService = LocationService();
   final NotificationService _notificationService = NotificationService();
+  final AutoAssignmentService _autoAssignmentService = AutoAssignmentService();
 
   RideModel? _currentRide;
   RideModel? get currentRide => _currentRide;
@@ -108,12 +110,44 @@ class RideService extends ChangeNotifier {
       // Start listening to updates
       _startListeningToRideUpdates(rideId);
 
+      // Schedule auto-assignment after 30 seconds if no manual acceptance
+      _scheduleAutoAssignment(rideId);
+
       _setLoading(false);
       return createdRide;
     } catch (e) {
       _setLoading(false);
       rethrow;
     }
+  }
+
+  /// Schedule auto-assignment for a ride request
+  void _scheduleAutoAssignment(String rideId) {
+    // Wait 30 seconds for manual acceptance, then try auto-assignment
+    Timer(const Duration(seconds: 30), () async {
+      try {
+        // Check if ride is still pending
+        final ride = await _databaseService.getRideById(rideId);
+        if (ride != null && ride.status == RideStatus.requested && ride.driverId == null) {
+          // Attempt auto-assignment
+          final assigned = await _autoAssignmentService.assignDriverToRequest(rideId);
+          if (assigned) {
+            print('✅ Auto-assigned driver to ride $rideId');
+          } else {
+            print('⚠️ Auto-assignment failed for ride $rideId, will retry');
+            // Retry after another 30 seconds
+            Timer(const Duration(seconds: 30), () async {
+              final ride2 = await _databaseService.getRideById(rideId);
+              if (ride2 != null && ride2.status == RideStatus.requested && ride2.driverId == null) {
+                await _autoAssignmentService.assignDriverToRequest(rideId);
+              }
+            });
+          }
+        }
+      } catch (e) {
+        print('Error in auto-assignment: $e');
+      }
+    });
   }
 
   // Helper method to calculate distance between two points

@@ -11,6 +11,7 @@ import '../../services/database_service.dart';
 import '../../services/driver_access_service.dart';
 import '../../services/network_service.dart';
 import '../../widgets/common/modern_alert_dialog.dart';
+import '../../l10n/app_localizations.dart';
 import '../home/driver/driver_home_screen.dart';
 import '../home/passenger/passenger_home_screen.dart';
 import 'driver_signup_screen.dart';
@@ -106,10 +107,11 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
 
       if (!mounted) return;
 
+      final localizations = AppLocalizations.of(context);
       final firebaseUser = userCredential?.user;
       if (firebaseUser == null) {
         print('❌ LoginScreen: Firebase user is null');
-        _showErrorDialog('Login Failed', 'No user found. Please try again.');
+        _showErrorDialog(localizations?.translate('login_failed') ?? 'Login Failed', localizations?.translate('no_user_found') ?? 'No user found. Please try again.');
         return;
       }
 
@@ -120,7 +122,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
 
       if (userModel == null) {
         print('❌ LoginScreen: User model is null - account data not found');
-        _showErrorDialog('Account Not Found', 'Account data not found. Please complete registration.');
+        _showErrorDialog(localizations?.translate('account_not_found') ?? 'Account Not Found', localizations?.translate('account_data_not_found') ?? 'Account data not found. Please complete registration.');
         return;
       }
 
@@ -180,7 +182,8 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
           ),
         );
       } else {
-        _showErrorDialog('Unknown Role', 'Unknown user role. Please contact support.');
+        final localizations = AppLocalizations.of(context);
+        _showErrorDialog(localizations?.translate('unknown_role') ?? 'Unknown Role', localizations?.translate('unknown_user_role') ?? 'Unknown user role. Please contact support.');
       }
     } catch (e) {
       print('❌ LoginScreen: Error during login: $e');
@@ -195,48 +198,50 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   }
 
   void _handleAuthError(dynamic error) {
-    String title = 'Login Failed';
-    String message = 'An unexpected error occurred. Please try again.';
+    final localizations = AppLocalizations.of(context);
+    String title = localizations?.translate('login_failed') ?? 'Login Failed';
+    String message = localizations?.translate('unexpected_error') ?? 'An unexpected error occurred. Please try again.';
 
     if (error is FirebaseAuthException) {
       switch (error.code) {
         case 'user-not-found':
-          title = 'Account Not Found';
-          message = 'No account found with this email address. Please check your email or create a new account.';
+          title = localizations?.translate('account_not_found') ?? 'Account Not Found';
+          message = localizations?.translate('no_account_found_email') ?? 'No account found with this email address. Please check your email or create a new account.';
           break;
         case 'wrong-password':
-          title = 'Incorrect Password';
-          message = 'The password you entered is incorrect. Please try again.';
+          title = localizations?.translate('incorrect_password') ?? 'Incorrect Password';
+          message = localizations?.translate('password_incorrect') ?? 'The password you entered is incorrect. Please try again.';
           break;
         case 'invalid-email':
-          title = 'Invalid Email';
-          message = 'Please enter a valid email address.';
+          title = localizations?.translate('invalid_email') ?? 'Invalid Email';
+          message = localizations?.translate('enter_valid_email') ?? 'Please enter a valid email address.';
           break;
         case 'user-disabled':
-          title = 'Account Disabled';
-          message = 'This account has been disabled. Please contact support.';
+          title = localizations?.translate('account_disabled') ?? 'Account Disabled';
+          message = localizations?.translate('account_disabled_message') ?? 'This account has been disabled. Please contact support.';
           break;
         case 'too-many-requests':
-          title = 'Too Many Attempts';
-          message = 'Too many failed login attempts. Please try again later.';
+          title = localizations?.translate('too_many_attempts') ?? 'Too Many Attempts';
+          message = localizations?.translate('too_many_failed_attempts') ?? 'Too many failed login attempts. Please try again later.';
           break;
         case 'network-request-failed':
-          title = 'Network Error';
-          message = 'Please check your internet connection and try again.';
+          title = localizations?.translate('network_error') ?? 'Network Error';
+          message = localizations?.translate('check_internet_connection') ?? 'Please check your internet connection and try again.';
           break;
         default:
-          title = 'Authentication Error';
-          message = 'Unable to sign in. Please check your credentials and try again.';
+          title = localizations?.translate('authentication_error') ?? 'Authentication Error';
+          message = localizations?.translate('unable_to_sign_in') ?? 'Unable to sign in. Please check your credentials and try again.';
       }
     } else if (error.toString().contains('network')) {
-      title = 'Connection Error';
-      message = 'Please check your internet connection and try again.';
+      title = localizations?.translate('connection_error') ?? 'Connection Error';
+      message = localizations?.translate('check_internet_connection') ?? 'Please check your internet connection and try again.';
     }
 
     _showErrorDialog(title, message);
   }
 
   void _showErrorDialog(String title, String message) {
+    final localizations = AppLocalizations.of(context);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -252,7 +257,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: Text('OK', style: TextStyle(color: AppColors.primary)),
+            child: Text(localizations?.translate('ok') ?? 'OK', style: TextStyle(color: AppColors.primary)),
           ),
         ],
       ),
@@ -323,16 +328,25 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
                             ),
                             const SizedBox(height: 12),
                             // Welcome Text
-                            Text(
-                              'Welcome Back!',
-                              style: TextStyle(color: AppColors.getTextPrimaryColor(isDark), fontSize: 22, fontWeight: FontWeight.bold),
-                              textAlign: TextAlign.center,
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Sign in to continue your journey',
-                              style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 13),
-                              textAlign: TextAlign.center,
+                            Builder(
+                              builder: (context) {
+                                final localizations = AppLocalizations.of(context);
+                                return Column(
+                                  children: [
+                                    Text(
+                                      localizations?.translate('welcome_back') ?? 'Welcome Back!',
+                                      style: TextStyle(color: AppColors.getTextPrimaryColor(isDark), fontSize: 22, fontWeight: FontWeight.bold),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      localizations?.translate('sign_in_to_continue') ?? 'Sign in to continue your journey',
+                                      style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 13),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ],
+                                );
+                              },
                             ),
                           ],
                         ),
@@ -349,51 +363,61 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
                           child: Column(
                             children: [
                               // Email Field
-                              _ModernTextField(
-                                controller: _emailController,
-                                focusNode: _emailFocusNode,
-                                label: 'Email',
-                                hint: 'Enter your email',
-                                icon: Icons.email_outlined,
-                                keyboardType: TextInputType.emailAddress,
-                                validator: (value) {
-                                  if (value == null || value.isEmpty) {
-                                    return 'Please enter your email';
-                                  }
-                                  if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
-                                    return 'Please enter a valid email';
-                                  }
-                                  return null;
+                              Builder(
+                                builder: (context) {
+                                  final localizations = AppLocalizations.of(context);
+                                  return _ModernTextField(
+                                    controller: _emailController,
+                                    focusNode: _emailFocusNode,
+                                    label: localizations?.translate('email') ?? 'Email',
+                                    hint: localizations?.translate('enter_your_email') ?? 'Enter your email',
+                                    icon: Icons.email_outlined,
+                                    keyboardType: TextInputType.emailAddress,
+                                    validator: (value) {
+                                      if (value == null || value.isEmpty) {
+                                        return localizations?.translate('please_enter_email') ?? 'Please enter your email';
+                                      }
+                                      if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+                                        return localizations?.translate('please_enter_valid_email') ?? 'Please enter a valid email';
+                                      }
+                                      return null;
+                                    },
+                                    isDark: isDark,
+                                  );
                                 },
-                                isDark: isDark,
                               ),
                               const SizedBox(height: 12),
                               // Password Field
-                              _ModernTextField(
-                                controller: _passwordController,
-                                focusNode: _passwordFocusNode,
-                                label: 'Password',
-                                hint: 'Enter your password',
-                                icon: Icons.lock_outline,
-                                obscureText: _obscurePassword,
-                                suffixIcon: IconButton(
-                                  icon: Icon(_obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined, color: AppColors.getIconColor(isDark)),
-                                  onPressed: () {
-                                    setState(() {
-                                      _obscurePassword = !_obscurePassword;
-                                    });
-                                  },
-                                ),
-                                validator: (value) {
-                                  if (value == null || value.isEmpty) {
-                                    return 'Please enter your password';
-                                  }
-                                  if (value.length < 6) {
-                                    return 'Password must be at least 6 characters';
-                                  }
-                                  return null;
+                              Builder(
+                                builder: (context) {
+                                  final localizations = AppLocalizations.of(context);
+                                  return _ModernTextField(
+                                    controller: _passwordController,
+                                    focusNode: _passwordFocusNode,
+                                    label: localizations?.translate('password') ?? 'Password',
+                                    hint: localizations?.translate('enter_your_password') ?? 'Enter your password',
+                                    icon: Icons.lock_outline,
+                                    obscureText: _obscurePassword,
+                                    suffixIcon: IconButton(
+                                      icon: Icon(_obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined, color: AppColors.getIconColor(isDark)),
+                                      onPressed: () {
+                                        setState(() {
+                                          _obscurePassword = !_obscurePassword;
+                                        });
+                                      },
+                                    ),
+                                    validator: (value) {
+                                      if (value == null || value.isEmpty) {
+                                        return localizations?.translate('please_enter_password') ?? 'Please enter your password';
+                                      }
+                                      if (value.length < 6) {
+                                        return localizations?.translate('password_min_length') ?? 'Password must be at least 6 characters';
+                                      }
+                                      return null;
+                                    },
+                                    isDark: isDark,
+                                  );
                                 },
-                                isDark: isDark,
                               ),
                               const SizedBox(height: 8),
                               // Remember Me & Forgot Password
@@ -411,80 +435,108 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
                                         isDark: isDark,
                                       ),
                                       const SizedBox(width: 6),
-                                      Text('Remember me', style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 12)),
+                                      Builder(
+                                        builder: (context) {
+                                          final localizations = AppLocalizations.of(context);
+                                          return Text(localizations?.translate('remember_me') ?? 'Remember me', style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 12));
+                                        },
+                                      ),
                                     ],
                                   ),
                                   const Spacer(),
-                                  TextButton(
-                                    onPressed: () async {
-                                      final emailController = TextEditingController(text: _emailController.text);
-                                      try {
-                                        final result = await showDialog<String>(
-                                          context: context,
-                                          builder: (context) => AlertDialog(
-                                            title: const Text('Reset Password'),
-                                            content: TextField(
-                                              controller: emailController,
-                                              keyboardType: TextInputType.emailAddress,
-                                              decoration: const InputDecoration(labelText: 'Enter your email'),
-                                            ),
-                                            actions: [
-                                              TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-                                              ElevatedButton(onPressed: () => Navigator.of(context).pop(emailController.text.trim()), child: const Text('Send Reset Link')),
-                                            ],
-                                          ),
-                                        );
-                                        if (result != null && result.isNotEmpty) {
+                                  Builder(
+                                    builder: (context) {
+                                      final localizations = AppLocalizations.of(context);
+                                      return TextButton(
+                                        onPressed: () async {
+                                          final emailController = TextEditingController(text: _emailController.text);
                                           try {
-                                            await Provider.of<AuthService>(context, listen: false).resetPassword(result);
-                                            ModernSnackBar.show(context, message: 'Password reset email sent! Check your inbox.');
-                                          } catch (e) {
-                                            ModernSnackBar.show(context, message: 'Failed to send reset email: ${e.toString()}', isError: true);
+                                            final result = await showDialog<String>(
+                                              context: context,
+                                              builder: (context) {
+                                                final localizations = AppLocalizations.of(context);
+                                                return AlertDialog(
+                                                  title: Text(localizations?.translate('reset_password') ?? 'Reset Password'),
+                                                  content: TextField(
+                                                    controller: emailController,
+                                                    keyboardType: TextInputType.emailAddress,
+                                                    decoration: InputDecoration(labelText: localizations?.translate('enter_your_email') ?? 'Enter your email'),
+                                                  ),
+                                                  actions: [
+                                                    TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(localizations?.translate('cancel') ?? 'Cancel')),
+                                                    ElevatedButton(onPressed: () => Navigator.of(context).pop(emailController.text.trim()), child: Text(localizations?.translate('send_reset_link') ?? 'Send Reset Link')),
+                                                  ],
+                                                );
+                                              },
+                                            );
+                                            if (result != null && result.isNotEmpty) {
+                                              try {
+                                                await Provider.of<AuthService>(context, listen: false).resetPassword(result);
+                                                ModernSnackBar.show(context, message: localizations?.translate('password_reset_email_sent') ?? 'Password reset email sent! Check your inbox.');
+                                              } catch (e) {
+                                                ModernSnackBar.show(context, message: '${localizations?.translate('failed_to_send_reset_email') ?? 'Failed to send reset email'}: ${e.toString()}', isError: true);
+                                              }
+                                            }
+                                          } finally {
+                                            emailController.dispose();
                                           }
-                                        }
-                                      } finally {
-                                        emailController.dispose();
-                                      }
+                                        },
+                                        child: Text(
+                                          localizations?.translate('forgot_password') ?? 'Forgot Password?',
+                                          style: TextStyle(color: AppColors.primary, fontSize: 12, fontWeight: FontWeight.w500),
+                                        ),
+                                      );
                                     },
-                                    child: Text(
-                                      'Forgot Password?',
-                                      style: TextStyle(color: AppColors.primary, fontSize: 12, fontWeight: FontWeight.w500),
-                                    ),
                                   ),
                                 ],
                               ),
                               const SizedBox(height: 18),
                               // Login Button
-                              _ModernButton(text: 'Sign In', onPressed: _isLoading ? null : _login, isLoading: _isLoading, isDark: isDark),
+                              Builder(
+                                builder: (context) {
+                                  final localizations = AppLocalizations.of(context);
+                                  return _ModernButton(text: localizations?.translate('sign_in') ?? 'Sign In', onPressed: _isLoading ? null : _login, isLoading: _isLoading, isDark: isDark);
+                                },
+                              ),
                               const SizedBox(height: 16),
                               // Divider
-                              Row(
-                                children: [
-                                  Expanded(child: Divider(color: AppColors.getDividerColor(isDark), thickness: 1)),
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                                    child: Text(
-                                      'OR',
-                                      style: TextStyle(color: AppColors.getTextHintColor(isDark), fontSize: 12, fontWeight: FontWeight.w500),
-                                    ),
-                                  ),
-                                  Expanded(child: Divider(color: AppColors.getDividerColor(isDark), thickness: 1)),
-                                ],
+                              Builder(
+                                builder: (context) {
+                                  final localizations = AppLocalizations.of(context);
+                                  return Row(
+                                    children: [
+                                      Expanded(child: Divider(color: AppColors.getDividerColor(isDark), thickness: 1)),
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                                        child: Text(
+                                          localizations?.translate('or') ?? 'OR',
+                                          style: TextStyle(color: AppColors.getTextHintColor(isDark), fontSize: 12, fontWeight: FontWeight.w500),
+                                        ),
+                                      ),
+                                      Expanded(child: Divider(color: AppColors.getDividerColor(isDark), thickness: 1)),
+                                    ],
+                                  );
+                                },
                               ),
                               const SizedBox(height: 12),
                               // Sign Up Link
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text("Don't have an account? ", style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 13)),
-                                  TextButton(
-                                    onPressed: _goToSignup,
-                                    child: Text(
-                                      'Sign Up',
-                                      style: TextStyle(color: AppColors.primary, fontSize: 13, fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                ],
+                              Builder(
+                                builder: (context) {
+                                  final localizations = AppLocalizations.of(context);
+                                  return Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(localizations?.translate('dont_have_account') ?? "Don't have an account? ", style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 13)),
+                                      TextButton(
+                                        onPressed: _goToSignup,
+                                        child: Text(
+                                          localizations?.translate('sign_up') ?? 'Sign Up',
+                                          style: TextStyle(color: AppColors.primary, fontSize: 13, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
                               ),
                             ],
                           ),

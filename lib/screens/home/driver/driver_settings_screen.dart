@@ -14,6 +14,8 @@ import '../../../services/database_service.dart';
 import '../../../services/clodinaryservice.dart';
 import '../../../services/referral_service.dart';
 import '../../../widgets/common/modern_alert_dialog.dart';
+import '../../../providers/locale_provider.dart';
+import '../../../l10n/app_localizations.dart';
 
 class DriverSettingsScreen extends StatefulWidget {
   const DriverSettingsScreen({super.key});
@@ -612,6 +614,131 @@ class _DriverSettingsScreenState extends State<DriverSettingsScreen> {
     );
   }
 
+  Widget _buildLanguageSection() {
+    return Consumer<LocaleProvider>(
+      builder: (context, localeProvider, child) {
+        return Card(
+          elevation: 4,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.language, color: AppColors.primary, size: 24),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Language',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.getTextPrimaryColor(Theme.of(context).brightness == Brightness.dark),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                InkWell(
+                  onTap: () => _showLanguageSelector(context, localeProvider),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Current Language',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: AppColors.getTextSecondaryColor(Theme.of(context).brightness == Brightness.dark),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                localeProvider.currentLanguageName,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.arrow_forward_ios, size: 16, color: AppColors.primary),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showLanguageSelector(BuildContext context, LocaleProvider localeProvider) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Select Language',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 20),
+            ...AppLocalizations.supportedLocales.map((locale) {
+              final isSelected = localeProvider.locale.languageCode == locale.languageCode;
+              return ListTile(
+                leading: Icon(
+                  isSelected ? Icons.check_circle : Icons.circle_outlined,
+                  color: isSelected ? AppColors.primary : Colors.grey,
+                ),
+                title: Text(
+                  localeProvider.getLanguageName(locale.languageCode),
+                  style: TextStyle(
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    color: isSelected ? AppColors.primary : null,
+                  ),
+                ),
+                onTap: () {
+                  localeProvider.setLocale(locale);
+                  Navigator.pop(context);
+                  ModernSnackBar.show(
+                    context,
+                    message: 'Language changed to ${localeProvider.getLanguageName(locale.languageCode)}',
+                  );
+                },
+              );
+            }),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -637,6 +764,8 @@ class _DriverSettingsScreenState extends State<DriverSettingsScreen> {
             _buildTownsSection(),
             const SizedBox(height: 16),
             _buildReferralSection(),
+            const SizedBox(height: 16),
+            _buildLanguageSection(),
             const SizedBox(height: 32),
           ],
         ),

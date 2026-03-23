@@ -66,6 +66,9 @@ dependencies:
   connectivity_plus:
   share_plus: ^7.0.2
   crypto:
+  shimmer: ^3.0.0
+  flutter_localizations:
+    sdk: flutter
 
 dev_dependencies:
   flutter_test:

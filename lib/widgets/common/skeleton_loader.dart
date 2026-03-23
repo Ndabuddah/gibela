@@ -1,189 +1,162 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:shimmer/shimmer.dart';
 import '../../constants/app_colors.dart';
 import '../../providers/theme_provider.dart';
-import 'modern_loading_indicator.dart';
+import 'package:provider/provider.dart';
 
-/// Skeleton loader for list items
-class SkeletonListLoader extends StatelessWidget {
-  final int itemCount;
-  final double itemHeight;
-  final EdgeInsets? padding;
-
-  const SkeletonListLoader({
-    Key? key,
-    this.itemCount = 5,
-    this.itemHeight = 100,
-    this.padding,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    final themeProvider = Provider.of<ThemeProvider>(context);
-    final isDark = themeProvider.isDarkMode;
-
-    return ListView.builder(
-      padding: padding ?? const EdgeInsets.all(16),
-      itemCount: itemCount,
-      itemBuilder: (context, index) {
-        return SkeletonCard(
-          height: itemHeight,
-          isDark: isDark,
-        );
-      },
-    );
-  }
-}
-
-/// Skeleton card widget
-class SkeletonCard extends StatelessWidget {
-  final double height;
-  final bool isDark;
-
-  const SkeletonCard({
-    Key? key,
-    this.height = 100,
-    required this.isDark,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      height: height,
-      decoration: BoxDecoration(
-        color: AppColors.getCardColor(isDark),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.getBorderColor(isDark)),
-      ),
-      child: ShimmerLoading(
-        isLoading: true,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  SkeletonBox(width: 60, height: 60, isDark: isDark),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SkeletonBox(width: double.infinity, height: 16, isDark: isDark),
-                        const SizedBox(height: 8),
-                        SkeletonBox(width: 150, height: 12, isDark: isDark),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              SkeletonBox(width: double.infinity, height: 12, isDark: isDark),
-              const SizedBox(height: 8),
-              SkeletonBox(width: 200, height: 12, isDark: isDark),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Simple skeleton box
-class SkeletonBox extends StatelessWidget {
+/// Skeleton loader widget for loading states
+class SkeletonLoader extends StatelessWidget {
   final double width;
   final double height;
-  final bool isDark;
   final BorderRadius? borderRadius;
 
-  const SkeletonBox({
+  const SkeletonLoader({
     Key? key,
     required this.width,
     required this.height,
-    required this.isDark,
     this.borderRadius,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: isDark ? Colors.grey[800] : Colors.grey[300],
-        borderRadius: borderRadius ?? BorderRadius.circular(8),
-      ),
-    );
-  }
-}
-
-/// Skeleton loader for ride card
-class SkeletonRideCard extends StatelessWidget {
-  final bool isDark;
-
-  const SkeletonRideCard({
-    Key? key,
-    required this.isDark,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.getCardColor(isDark),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.getBorderColor(isDark)),
-      ),
-      child: ShimmerLoading(
-        isLoading: true,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                SkeletonBox(width: 80, height: 20, isDark: isDark),
-                const Spacer(),
-                SkeletonBox(width: 60, height: 16, isDark: isDark),
-              ],
-            ),
-            const SizedBox(height: 16),
-            SkeletonBox(width: 200, height: 18, isDark: isDark),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                SkeletonBox(width: 16, height: 16, isDark: isDark),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: SkeletonBox(width: double.infinity, height: 14, isDark: isDark),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                SkeletonBox(width: 16, height: 16, isDark: isDark),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: SkeletonBox(width: double.infinity, height: 14, isDark: isDark),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                SkeletonBox(width: 100, height: 14, isDark: isDark),
-                const Spacer(),
-                SkeletonBox(width: 80, height: 20, isDark: isDark),
-              ],
-            ),
-          ],
+    final isDark = Provider.of<ThemeProvider>(context).isDarkMode;
+    
+    return Shimmer.fromColors(
+      baseColor: isDark ? AppColors.darkCard : AppColors.uberGreyLight,
+      highlightColor: isDark ? AppColors.darkSurface : AppColors.white,
+      period: const Duration(milliseconds: 1200),
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.darkCard : AppColors.uberGreyLight,
+          borderRadius: borderRadius ?? BorderRadius.circular(8),
         ),
       ),
     );
   }
 }
 
+/// Skeleton card for ride history items
+class SkeletonRideCard extends StatelessWidget {
+  const SkeletonRideCard({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Provider.of<ThemeProvider>(context).isDarkMode
+            ? AppColors.darkCard
+            : AppColors.white,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const SkeletonLoader(width: 60, height: 60, borderRadius: BorderRadius.all(Radius.circular(30))),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SkeletonLoader(width: 120, height: 16),
+                    const SizedBox(height: 8),
+                    const SkeletonLoader(width: 80, height: 14),
+                  ],
+                ),
+              ),
+              const SkeletonLoader(width: 60, height: 20),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const SkeletonLoader(width: double.infinity, height: 1),
+          const SizedBox(height: 12),
+          const SkeletonLoader(width: 150, height: 14),
+        ],
+      ),
+    );
+  }
+}
+
+/// Skeleton list for ride history
+class SkeletonRideList extends StatelessWidget {
+  final int itemCount;
+  
+  const SkeletonRideList({Key? key, this.itemCount = 5}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      itemCount: itemCount,
+      itemBuilder: (context, index) => const SkeletonRideCard(),
+    );
+  }
+}
+
+/// Skeleton for earnings card
+class SkeletonEarningsCard extends StatelessWidget {
+  const SkeletonEarningsCard({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Provider.of<ThemeProvider>(context).isDarkMode
+            ? AppColors.darkCard
+            : AppColors.white,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SkeletonLoader(width: 120, height: 16),
+          const SizedBox(height: 16),
+          const SkeletonLoader(width: 150, height: 32),
+          const SizedBox(height: 8),
+          const SkeletonLoader(width: 100, height: 14),
+        ],
+      ),
+    );
+  }
+}
+
+/// Skeleton for driver card
+class SkeletonDriverCard extends StatelessWidget {
+  const SkeletonDriverCard({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Provider.of<ThemeProvider>(context).isDarkMode
+            ? AppColors.darkCard
+            : AppColors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          const SkeletonLoader(width: 60, height: 60, borderRadius: BorderRadius.all(Radius.circular(30))),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SkeletonLoader(width: 150, height: 18),
+                const SizedBox(height: 8),
+                const SkeletonLoader(width: 100, height: 14),
+                const SizedBox(height: 4),
+                const SkeletonLoader(width: 80, height: 14),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

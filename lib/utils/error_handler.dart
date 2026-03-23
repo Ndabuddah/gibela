@@ -59,22 +59,50 @@ class AppErrorHandler {
     );
   }
 
-  /// Show error dialog
+  /// Show error dialog with enhanced UI
   static void showErrorDialog(
     BuildContext context,
     dynamic error, {
     VoidCallback? onRetry,
     String? title,
+    String? customMessage,
+    VoidCallback? onContactSupport,
   }) {
     logger.error('Error dialog shown', error: error);
 
-    final message = getUserFriendlyMessage(error);
+    final message = customMessage ?? getUserFriendlyMessage(error);
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(title ?? 'Error'),
-        content: Text(message),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.error_outline, color: AppColors.error, size: 28),
+            const SizedBox(width: 12),
+            Expanded(child: Text(title ?? 'Error', style: const TextStyle(fontSize: 20))),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message, style: const TextStyle(fontSize: 16)),
+            if (onContactSupport != null) ...[
+              const SizedBox(height: 16),
+              const Divider(),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  onContactSupport();
+                },
+                icon: const Icon(Icons.support_agent),
+                label: const Text('Contact Support'),
+              ),
+            ],
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
@@ -86,10 +114,29 @@ class AppErrorHandler {
                 Navigator.of(context).pop();
                 onRetry();
               },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: AppColors.black,
+              ),
               child: const Text('Retry'),
             ),
         ],
       ),
+    );
+  }
+  
+  /// Show success message
+  static void showSuccess(
+    BuildContext context,
+    String message, {
+    Duration duration = const Duration(seconds: 3),
+  }) {
+    if (!context.mounted) return;
+    ModernSnackBar.show(
+      context,
+      message: message,
+      isError: false,
+      duration: duration,
     );
   }
 

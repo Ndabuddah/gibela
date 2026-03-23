@@ -9,6 +9,7 @@ import '../../models/ride_model.dart';
 import '../../services/database_service.dart';
 import '../../widgets/common/empty_state_widget.dart';
 import '../../widgets/common/skeleton_loader.dart';
+import '../../l10n/app_localizations.dart';
 import '../home/passenger/request_ride_screen.dart';
 
 class ComprehensiveRideHistoryScreen extends StatefulWidget {
@@ -164,7 +165,7 @@ class _ComprehensiveRideHistoryScreenState extends State<ComprehensiveRideHistor
     return Scaffold(
       backgroundColor: AppColors.getBackgroundColor(isDark),
       appBar: AppBar(
-        title: const Text('Ride History'),
+        title: Text(AppLocalizations.of(context)?.translate('ride_history') ?? 'Ride History'),
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: IconThemeData(color: AppColors.getIconColor(isDark)),
@@ -181,7 +182,7 @@ class _ComprehensiveRideHistoryScreenState extends State<ComprehensiveRideHistor
           _buildSearchAndFilters(isDark),
           Expanded(
             child: _isLoading
-                ? SkeletonListLoader(itemCount: 5, itemHeight: 150)
+                ? const SkeletonRideList(itemCount: 5)
                 : _filteredRides.isEmpty
                     ? EmptyStateWidget(
                         title: 'No Rides Found',
@@ -189,7 +190,6 @@ class _ComprehensiveRideHistoryScreenState extends State<ComprehensiveRideHistor
                             ? 'Try adjusting your search or filters'
                             : 'Your ride history will appear here',
                         icon: Icons.history,
-                        showAction: false,
                       )
                     : ListView.builder(
                         padding: const EdgeInsets.all(16),
@@ -472,7 +472,7 @@ class _ComprehensiveRideHistoryScreenState extends State<ComprehensiveRideHistor
 
     if (pickupAddress == null || dropoffAddress == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cannot rebook: Missing location information')),
+        SnackBar(content: Text(AppLocalizations.of(context)?.translate('cannot_rebook') ?? 'Cannot rebook: Missing location information')),
       );
       return;
     }

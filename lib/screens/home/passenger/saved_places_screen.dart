@@ -60,7 +60,7 @@ class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
               title: 'No Saved Places',
               message: 'Save your favorite locations for quick access when booking rides.',
               icon: Icons.bookmark_border,
-              actionText: 'Add Place',
+              actionLabel: 'Add Place',
               onAction: () => _showAddPlaceDialog(context, isDark),
             );
           }

@@ -11,6 +11,7 @@ import '../../../widgets/common/loading_indicator.dart';
 import '../../../widgets/common/rating_dialog.dart';
 import '../../../services/database_service.dart';
 import '../../../widgets/common/modern_alert_dialog.dart';
+import '../../../l10n/app_localizations.dart';
 import 'request_ride_screen.dart';
 import 'ride_progress_screen.dart';
 import '../../chat/chat_screen.dart';
@@ -123,7 +124,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
     } catch (e) {
       setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading bookings: $e')),
+        SnackBar(content: Text('${AppLocalizations.of(context)?.translate('error_loading_bookings') ?? 'Error loading bookings'}: $e')),
       );
     }
   }
@@ -138,7 +139,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
       
       if (!bookingDoc.exists) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Booking not found')),
+          SnackBar(content: Text(AppLocalizations.of(context)?.translate('booking_not_found') ?? 'Booking not found')),
         );
         return;
       }
@@ -205,7 +206,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error cancelling booking: $e')),
+        SnackBar(content: Text('${AppLocalizations.of(context)?.translate('error_cancelling_booking') ?? 'Error cancelling booking'}: $e')),
       );
     }
   }
@@ -229,7 +230,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error setting reminder: $e')),
+        SnackBar(content: Text('${AppLocalizations.of(context)?.translate('error_setting_reminder') ?? 'Error setting reminder'}: $e')),
       );
     }
   }
@@ -242,7 +243,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
     return Scaffold(
       backgroundColor: AppColors.getBackgroundColor(isDark),
       appBar: AppBar(
-        title: const Text('My Bookings'),
+        title: Text(AppLocalizations.of(context)?.translate('my_bookings') ?? 'My Bookings'),
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: IconThemeData(color: AppColors.getIconColor(isDark)),
@@ -258,10 +259,10 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
           indicatorColor: AppColors.primary,
           labelColor: AppColors.primary,
           unselectedLabelColor: AppColors.getTextSecondaryColor(isDark),
-          tabs: const [
-            Tab(text: 'Scheduled'),
-            Tab(text: 'Active'),
-            Tab(text: 'Past'),
+          tabs: [
+            Tab(text: AppLocalizations.of(context)?.translate('scheduled') ?? 'Scheduled'),
+            Tab(text: AppLocalizations.of(context)?.translate('active_ride') ?? 'Active'),
+            Tab(text: AppLocalizations.of(context)?.translate('past') ?? 'Past'),
           ],
         ),
       ),
@@ -282,10 +283,10 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
     if (_scheduledBookings.isEmpty) {
       return _buildEmptyState(
         isDark,
-        'No Scheduled Trips',
-        'You don\'t have any scheduled trips yet.',
+        AppLocalizations.of(context)?.translate('no_scheduled_trips') ?? 'No Scheduled Trips',
+        AppLocalizations.of(context)?.translate('no_scheduled_trips_desc') ?? 'You don\'t have any scheduled trips yet.',
         Icons.schedule,
-        'Schedule a Trip',
+        AppLocalizations.of(context)?.translate('schedule_ride') ?? 'Schedule a Trip',
         () {
           Navigator.of(context).pop();
         },
@@ -306,10 +307,10 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
     if (_activeRides.isEmpty) {
       return _buildEmptyState(
         isDark,
-        'No Active Rides',
-        'You don\'t have any active rides at the moment.',
+        AppLocalizations.of(context)?.translate('no_active_rides') ?? 'No Active Rides',
+        AppLocalizations.of(context)?.translate('no_active_rides_desc') ?? 'You don\'t have any active rides at the moment.',
         Icons.local_taxi,
-        'Book a Ride',
+        AppLocalizations.of(context)?.translate('book_ride') ?? 'Book a Ride',
         () {
           Navigator.of(context).pop();
         },
@@ -330,10 +331,10 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
     if (_pastRides.isEmpty) {
       return _buildEmptyState(
         isDark,
-        'No Past Rides',
-        'Your ride history will appear here.',
+        AppLocalizations.of(context)?.translate('no_past_rides') ?? 'No Past Rides',
+        AppLocalizations.of(context)?.translate('no_rides_desc') ?? 'Your ride history will appear here.',
         Icons.history,
-        'Book a Ride',
+        AppLocalizations.of(context)?.translate('book_ride') ?? 'Book a Ride',
         () {
           Navigator.of(context).pop();
         },
@@ -412,7 +413,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
                       case 'edit':
                         // TODO: Implement edit functionality
                         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Edit functionality coming soon!')),
+            SnackBar(content: Text(AppLocalizations.of(context)?.translate('edit_coming_soon') ?? 'Edit functionality coming soon!')),
           );
                         break;
                     }
@@ -437,7 +438,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
                         children: [
                           Icon(Icons.edit, size: 20),
                           const SizedBox(width: 8),
-                          const Text('Edit'),
+                          Text(AppLocalizations.of(context)?.translate('edit') ?? 'Edit'),
                         ],
                       ),
                     ),
@@ -447,7 +448,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
                         children: [
                           Icon(Icons.cancel, size: 20, color: Colors.red),
                           const SizedBox(width: 8),
-                          const Text('Cancel', style: TextStyle(color: Colors.red)),
+                          Text(AppLocalizations.of(context)?.translate('cancel') ?? 'Cancel', style: const TextStyle(color: Colors.red)),
                         ],
                       ),
                     ),
@@ -670,7 +671,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    'Active',
+                    AppLocalizations.of(context)?.translate('active_ride') ?? 'Active',
                     style: TextStyle(
                       color: AppColors.primary,
                       fontWeight: FontWeight.w600,
@@ -801,7 +802,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
                       );
                     },
                     icon: const Icon(Icons.location_on),
-                    label: const Text('Track'),
+                    label: Text(AppLocalizations.of(context)?.translate('track') ?? 'Track'),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
@@ -815,7 +816,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
                   child: ElevatedButton.icon(
                     onPressed: () => _openChat(booking),
                     icon: const Icon(Icons.chat),
-                    label: const Text('Chat'),
+                    label: Text(AppLocalizations.of(context)?.translate('chat') ?? 'Chat'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
@@ -981,7 +982,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
                     child: OutlinedButton.icon(
                       onPressed: () => _rebookRide(booking),
                       icon: const Icon(Icons.replay),
-                      label: const Text('Rebook'),
+                      label: Text(AppLocalizations.of(context)?.translate('rebook') ?? 'Rebook'),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(
@@ -995,7 +996,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
                     child: ElevatedButton.icon(
                       onPressed: () => _showRatingDialog(booking),
                       icon: const Icon(Icons.star),
-                      label: const Text('Rate'),
+                      label: Text(AppLocalizations.of(context)?.translate('rate_driver') ?? 'Rate'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
@@ -1119,17 +1120,17 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
           children: [
             Icon(Icons.cancel, color: Colors.red, size: 28),
             const SizedBox(width: 12),
-            const Text('Cancel Booking'),
+            Text(AppLocalizations.of(context)?.translate('cancel_booking') ?? 'Cancel Booking'),
           ],
         ),
-        content: const Text(
-          'Are you sure you want to cancel this scheduled trip? This action cannot be undone.',
-          style: TextStyle(fontSize: 16),
+        content: Text(
+          AppLocalizations.of(context)?.translate('are_you_sure_cancel_trip') ?? 'Are you sure you want to cancel this scheduled trip? This action cannot be undone.',
+          style: const TextStyle(fontSize: 16),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Keep'),
+            child: Text(AppLocalizations.of(context)?.translate('keep') ?? 'Keep'),
           ),
           ElevatedButton(
             onPressed: () {
@@ -1140,7 +1141,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
               backgroundColor: Colors.red,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            child: const Text('Cancel Trip', style: TextStyle(color: Colors.white)),
+            child: Text(AppLocalizations.of(context)?.translate('cancel_ride') ?? 'Cancel Trip', style: const TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -1205,7 +1206,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
             if (mounted) {
               ModernSnackBar.show(
                 context,
-                message: 'Thank you for your rating!',
+                message: AppLocalizations.of(context)?.translate('thank_you_rating') ?? 'Thank you for your rating!',
               );
               // Reload bookings to reflect the change
               await _loadBookings();
@@ -1214,7 +1215,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
             if (mounted) {
               ModernSnackBar.show(
                 context,
-                message: 'Failed to submit rating: $e',
+                message: '${AppLocalizations.of(context)?.translate('failed_submit_rating') ?? 'Failed to submit rating'}: $e',
                 isError: true,
               );
             }
@@ -1235,7 +1236,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> with TickerProvider
     if (pickupAddress == null || dropoffAddress == null) {
       ModernSnackBar.show(
         context,
-        message: 'Cannot rebook: Missing location information',
+        message: AppLocalizations.of(context)?.translate('cannot_rebook') ?? 'Cannot rebook: Missing location information',
         isError: true,
       );
       return;

@@ -11,6 +11,7 @@ import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:gibelbibela/screens/auth/female_verification_screen.dart';
@@ -25,6 +26,10 @@ import '../../../models/user_model.dart';
 import '../../../providers/theme_provider.dart';
 import '../../../services/database_service.dart';
 import '../../../widgets/common/custom_button.dart';
+import '../../../widgets/passenger/route_preview_widget.dart';
+import '../../../widgets/passenger/split_fare_widget.dart';
+import '../../../services/map_route_service.dart';
+import '../../../l10n/app_localizations.dart';
 import '../../chat/chat_screen.dart';
 import '../../payments/ride_request_payment.dart';
 // Removed: import 'widgets/prediction_list.dart';
@@ -83,6 +88,9 @@ class _RequestRideScreenState extends State<RequestRideScreen> with TickerProvid
   bool _showRideBooking = false;
   bool _showVehicleTypes = false;
   bool _showConfirmation = false;
+  bool _showRoutePreview = false;
+  bool _showSplitFare = false;
+  RouteInfo? _selectedRoute;
   final TextEditingController _pickupController = TextEditingController();
   final TextEditingController _dropoffController = TextEditingController();
   late AnimationController _animationController;
@@ -259,7 +267,7 @@ class _RequestRideScreenState extends State<RequestRideScreen> with TickerProvid
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error getting location: $e')),
+        SnackBar(content: Text('${AppLocalizations.of(context)?.translate('error_getting_location') ?? 'Error getting location'}: $e')),
       );
       // Default to Johannesburg if location not available
       _currentLatLng = LatLng(-26.2041, 28.0473);
@@ -380,7 +388,7 @@ class _RequestRideScreenState extends State<RequestRideScreen> with TickerProvid
       _refreshDisabledTypesOnDemand();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select both pickup and dropoff locations')),
+        SnackBar(content: Text(AppLocalizations.of(context)?.translate('please_select_pickup_dropoff') ?? 'Please select both pickup and dropoff locations')),
       );
     }
   }
@@ -401,11 +409,11 @@ class _RequestRideScreenState extends State<RequestRideScreen> with TickerProvid
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('Cancel'),
+                  child: Text(AppLocalizations.of(context)?.translate('cancel') ?? 'Cancel'),
                 ),
                 ElevatedButton(
                   onPressed: () => Navigator.of(context).pop(true),
-                  child: const Text('Verify'),
+                  child: Text(AppLocalizations.of(context)?.translate('verify') ?? 'Verify'),
                 ),
               ],
             ),
@@ -425,16 +433,16 @@ class _RequestRideScreenState extends State<RequestRideScreen> with TickerProvid
         final shouldVerify = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('Female Verification Required'),
-            content: const Text('You need to verify as a female to use AsambeGirl rides.'),
+            title: Text(AppLocalizations.of(context)?.translate('female_verification_required') ?? 'Female Verification Required'),
+            content: Text(AppLocalizations.of(context)?.translate('female_verification_message') ?? 'You need to verify as a female to use AsambeGirl rides.'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Cancel'),
+                child: Text(AppLocalizations.of(context)?.translate('cancel') ?? 'Cancel'),
               ),
               ElevatedButton(
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Verify'),
+                child: Text(AppLocalizations.of(context)?.translate('verify') ?? 'Verify'),
               ),
             ],
           ),
@@ -455,16 +463,16 @@ class _RequestRideScreenState extends State<RequestRideScreen> with TickerProvid
         final shouldVerify = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('Student Verification Required'),
-            content: const Text('You need to verify as a student to use AsambeStudent rides.'),
+            title: Text(AppLocalizations.of(context)?.translate('student_verification_required') ?? 'Student Verification Required'),
+            content: Text(AppLocalizations.of(context)?.translate('student_verification_message') ?? 'You need to verify as a student to use AsambeStudent rides.'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Cancel'),
+                child: Text(AppLocalizations.of(context)?.translate('cancel') ?? 'Cancel'),
               ),
               ElevatedButton(
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Verify'),
+                child: Text(AppLocalizations.of(context)?.translate('verify') ?? 'Verify'),
               ),
             ],
           ),
@@ -530,14 +538,17 @@ class _RequestRideScreenState extends State<RequestRideScreen> with TickerProvid
     if (type == 'asambegirl') {
       final shouldVerify = await showDialog<bool>(
         context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Female Verification Required'),
-          content: const Text('You need to verify as a female to use AsambeGirl rides.'),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-            ElevatedButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Verify')),
-          ],
-        ),
+        builder: (context) {
+          final localizations = AppLocalizations.of(context);
+          return AlertDialog(
+            title: Text(localizations?.translate('female_verification_required') ?? 'Female Verification Required'),
+            content: Text(localizations?.translate('female_verification_message') ?? 'You need to verify as a female to use AsambeGirl rides.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text(localizations?.translate('cancel') ?? 'Cancel')),
+              ElevatedButton(onPressed: () => Navigator.of(context).pop(true), child: Text(localizations?.translate('verify') ?? 'Verify')),
+            ],
+          );
+        },
       );
       if (shouldVerify == true && mounted) {
         Navigator.of(context).push(
@@ -548,11 +559,11 @@ class _RequestRideScreenState extends State<RequestRideScreen> with TickerProvid
       final shouldVerify = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Student Verification Required'),
-          content: const Text('You need to verify as a student to use AsambeStudent rides.'),
+          title: Text(AppLocalizations.of(context)?.translate('student_verification_required') ?? 'Student Verification Required'),
+          content: Text(AppLocalizations.of(context)?.translate('student_verification_message') ?? 'You need to verify as a student to use AsambeStudent rides.'),
           actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-            ElevatedButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Verify')),
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text(AppLocalizations.of(context)?.translate('cancel') ?? 'Cancel')),
+            ElevatedButton(onPressed: () => Navigator.of(context).pop(true), child: Text(AppLocalizations.of(context)?.translate('verify') ?? 'Verify')),
           ],
         ),
       );
@@ -616,7 +627,7 @@ class _RequestRideScreenState extends State<RequestRideScreen> with TickerProvid
   Future<void> _createRideRequest() async {
     if (_dropoffAddress.isEmpty || _dropoffCoordinates == null || _pickupCoordinates == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a dropoff location before requesting a ride.')),
+        SnackBar(content: Text(AppLocalizations.of(context)?.translate('please_select_dropoff') ?? 'Please select a dropoff location before requesting a ride.')),
       );
       setState(() {
         _isLoading = false;
@@ -761,10 +772,10 @@ class _RequestRideScreenState extends State<RequestRideScreen> with TickerProvid
           _showConfirmation = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Your ride request timed out. No driver was available. Please try again.'),
+          SnackBar(
+            content: Text(AppLocalizations.of(context)?.translate('ride_request_timeout') ?? 'Your ride request timed out. No driver was available. Please try again.'),
             backgroundColor: Colors.orange,
-            duration: Duration(seconds: 5),
+            duration: const Duration(seconds: 5),
           ),
         );
       }
@@ -914,9 +925,9 @@ class _RequestRideScreenState extends State<RequestRideScreen> with TickerProvid
                                 color: AppColors.primary.withOpacity(0.1),
                                 borderRadius: BorderRadius.circular(20),
                               ),
-                              child: const Text(
-                                'Best Price',
-                                style: TextStyle(
+                              child: Text(
+                                AppLocalizations.of(context)?.translate('best_price') ?? 'Best Price',
+                                style: const TextStyle(
                                   color: AppColors.primaryDark,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 12,
@@ -1007,7 +1018,12 @@ class _RequestRideScreenState extends State<RequestRideScreen> with TickerProvid
                                               const SizedBox(width: 12),
                                               const Icon(Icons.access_time_rounded, size: 14, color: Colors.grey),
                                               const SizedBox(width: 4),
-                                              const Text('3 min', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                                              Builder(
+                                                builder: (context) {
+                                                  final localizations = AppLocalizations.of(context);
+                                                  return Text('3 ${localizations?.translate('min') ?? 'min'}', style: const TextStyle(color: Colors.grey, fontSize: 12));
+                                                },
+                                              ),
                                             ],
                                           ),
                                         ],
@@ -1263,6 +1279,100 @@ class _RequestRideScreenState extends State<RequestRideScreen> with TickerProvid
                       ],
                     ),
                   ),
+                  
+                  const SizedBox(height: 24),
+                  
+                  // Route Preview Section
+                  if (_pickupCoordinates != null && _dropoffCoordinates != null) ...[
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Route Preview',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.getTextPrimaryColor(isDark),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () {
+                            setModalState(() {
+                              _showRoutePreview = !_showRoutePreview;
+                            });
+                          },
+                          icon: Icon(
+                            _showRoutePreview ? Icons.expand_less : Icons.expand_more,
+                            size: 20,
+                          ),
+                          label: Text(_showRoutePreview ? 'Hide' : 'Show'),
+                        ),
+                      ],
+                    ),
+                    if (_showRoutePreview) ...[
+                      const SizedBox(height: 12),
+                      RoutePreviewWidget(
+                        pickup: gmaps.LatLng(_pickupCoordinates![0], _pickupCoordinates![1]),
+                        dropoff: gmaps.LatLng(_dropoffCoordinates![0], _dropoffCoordinates![1]),
+                        onRouteSelected: (route) {
+                          setModalState(() {
+                            _selectedRoute = route;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 24),
+                    ],
+                  ],
+                  
+                  // Split Fare Option
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.people, size: 20, color: AppColors.primary),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Split Fare',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.getTextPrimaryColor(isDark),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Switch(
+                        value: _showSplitFare,
+                        onChanged: (value) {
+                          setModalState(() {
+                            _showSplitFare = value;
+                          });
+                        },
+                        activeColor: AppColors.primary,
+                      ),
+                    ],
+                  ),
+                  if (_showSplitFare) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: isDark ? AppColors.darkSurface : AppColors.uberGreyLight,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        _currentRequestId == null
+                            ? 'Split fare will be available after booking'
+                            : 'Split fare feature - Add participants after booking',
+                        style: TextStyle(
+                          color: isDark ? AppColors.white : AppColors.black,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
                   
                   const SizedBox(height: 24),
                   
@@ -1880,7 +1990,7 @@ class _RequestRideScreenState extends State<RequestRideScreen> with TickerProvid
                     child: Column(
                       children: [
                         Text(eta.split(' ')[0], style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: AppColors.primaryDark)),
-                        const Text('min', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.primaryDark)),
+                        Text(AppLocalizations.of(context)?.translate('min') ?? 'min', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.primaryDark)),
                       ],
                     ),
                   ),
@@ -2360,11 +2470,11 @@ class _RideFindingOverlay extends StatelessWidget {
                 Text(status, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.getTextPrimaryColor(isDark))),
                 if (driverName.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  Text('Driver: $driverName', style: TextStyle(color: AppColors.getTextSecondaryColor(isDark))),
+                  Text('${AppLocalizations.of(context)?.translate('driver') ?? 'Driver'}: $driverName', style: TextStyle(color: AppColors.getTextSecondaryColor(isDark))),
                 ],
                 if (eta.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  Text('ETA: $eta', style: TextStyle(color: AppColors.getTextSecondaryColor(isDark))),
+                  Text('${AppLocalizations.of(context)?.translate('eta') ?? 'ETA'}: $eta', style: TextStyle(color: AppColors.getTextSecondaryColor(isDark))),
                 ],
                 const SizedBox(height: 18),
                 OutlinedButton(

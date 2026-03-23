@@ -14,6 +14,7 @@ import '../../services/clodinaryservice.dart';
 import '../../widgets/common/modern_alert_dialog.dart';
 import '../../widgets/common/custom_button.dart';
 import '../../widgets/common/custom_text_field.dart';
+import '../../l10n/app_localizations.dart';
 import 'email_verification_screen.dart';
 import 'login_screen.dart';
 import 'no_car_application_screen.dart';
@@ -114,15 +115,16 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
   }
 
   Future<void> _signup() async {
+    final localizations = AppLocalizations.of(context);
     if (!_formKey.currentState!.validate()) return;
     if (!_agreeToTerms) {
-      ModernSnackBar.show(context, message: 'Please agree to the terms and conditions', isError: true);
+      ModernSnackBar.show(context, message: localizations?.translate('please_agree_terms') ?? 'Please agree to the terms and conditions', isError: true);
       return;
     }
 
     // Check if profile image is selected for passengers
     if (_selectedRole == 'passenger' && _profileImage == null) {
-      ModernSnackBar.show(context, message: 'Please select a profile image', isError: true);
+      ModernSnackBar.show(context, message: localizations?.translate('please_select_profile_image') ?? 'Please select a profile image', isError: true);
       return;
     }
 
@@ -239,19 +241,20 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
         return;
       }
 
-      String errorMessage = 'Signup failed';
+      final localizations = AppLocalizations.of(context);
+      String errorMessage = localizations?.translate('signup_failed') ?? 'Signup failed';
       if (e.toString().contains('email-already-in-use')) {
-        errorMessage = 'An account with this email already exists';
+        errorMessage = localizations?.translate('account_exists_email') ?? 'An account with this email already exists';
       } else if (e.toString().contains('weak-password')) {
-        errorMessage = 'Password is too weak. Please use a stronger password';
+        errorMessage = localizations?.translate('password_too_weak') ?? 'Password is too weak. Please use a stronger password';
       } else if (e.toString().contains('invalid-email')) {
-        errorMessage = 'Please enter a valid email address';
+        errorMessage = localizations?.translate('please_enter_valid_email') ?? 'Please enter a valid email address';
       } else if (e.toString().contains('network-request-failed') || e.toString().contains('SocketException') || e.toString().contains('TimeoutException')) {
-        errorMessage = 'Network error. Please check your internet connection and try again';
+        errorMessage = localizations?.translate('network_error_check_connection') ?? 'Network error. Please check your internet connection and try again';
       } else if (e.toString().contains('permission-denied')) {
-        errorMessage = 'Permission denied. Please check your Firebase configuration';
+        errorMessage = localizations?.translate('permission_denied_firebase') ?? 'Permission denied. Please check your Firebase configuration';
       } else {
-        errorMessage = 'Signup failed: ${e.toString()}';
+        errorMessage = '${localizations?.translate('signup_failed') ?? 'Signup failed'}: ${e.toString()}';
       }
 
       ModernSnackBar.show(context, message: errorMessage, isError: true);
@@ -281,6 +284,7 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final isDark = themeProvider.isDarkMode;
+    final localizations = AppLocalizations.of(context);
 
     return Scaffold(
       backgroundColor: AppColors.getBackgroundColor(isDark),
@@ -319,13 +323,13 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                     Column(
                       children: [
                         Text(
-                          'Create Account',
+                          localizations?.translate('create_account') ?? 'Create Account',
                           style: TextStyle(color: AppColors.getTextPrimaryColor(isDark), fontSize: 32, fontWeight: FontWeight.bold),
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Join RideApp and start your journey',
+                          localizations?.translate('join_rideapp_start_journey') ?? 'Join RideApp and start your journey',
                           style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 16),
                           textAlign: TextAlign.center,
                         ),
@@ -344,12 +348,12 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                           _ModernTextField(
                             controller: _fullNameController,
                             focusNode: _fullNameFocusNode,
-                            label: 'Full Name',
-                            hint: 'Enter your full name',
+                            label: localizations?.translate('full_name') ?? 'Full Name',
+                            hint: localizations?.translate('enter_your_full_name') ?? 'Enter your full name',
                             icon: Icons.person_outline,
                             validator: (value) {
                               if (value == null || value.isEmpty) {
-                                return 'Please enter your full name';
+                                return localizations?.translate('please_enter_full_name') ?? 'Please enter your full name';
                               }
                               return null;
                             },
@@ -361,12 +365,12 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                           _ModernTextField(
                             controller: _surnameController,
                             focusNode: FocusNode(),
-                            label: 'Surname',
-                            hint: 'Enter your surname',
+                            label: localizations?.translate('surname') ?? 'Surname',
+                            hint: localizations?.translate('enter_your_surname') ?? 'Enter your surname',
                             icon: Icons.person_outline,
                             validator: (value) {
                               if (value == null || value.isEmpty) {
-                                return 'Please enter your surname';
+                                return localizations?.translate('please_enter_surname') ?? 'Please enter your surname';
                               }
                               return null;
                             },
@@ -387,6 +391,7 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                               });
                             },
                             isDark: isDark,
+                            localizations: localizations,
                           ),
 
                           const SizedBox(height: 20),
@@ -403,7 +408,7 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                               child: Column(
                                 children: [
                                   Text(
-                                    'Profile Image',
+                                    localizations?.translate('profile_image') ?? 'Profile Image',
                                     style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w600,
@@ -424,7 +429,7 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
-                                    'Tap to add profile picture',
+                                    localizations?.translate('tap_to_add_profile_picture') ?? 'Tap to add profile picture',
                                     style: TextStyle(
                                       fontSize: 12,
                                       color: AppColors.getTextSecondaryColor(isDark),
@@ -433,7 +438,7 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                                   if (_profileImage == null) ...[
                                     const SizedBox(height: 4),
                                     Text(
-                                      'Profile image is required for passengers',
+                                      localizations?.translate('profile_image_required_passengers') ?? 'Profile image is required for passengers',
                                       style: TextStyle(
                                         fontSize: 11,
                                         color: Colors.orange[700],
@@ -451,16 +456,16 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                           _ModernTextField(
                             controller: _emailController,
                             focusNode: _emailFocusNode,
-                            label: 'Email',
-                            hint: 'Enter your email',
+                            label: localizations?.translate('email') ?? 'Email',
+                            hint: localizations?.translate('enter_your_email') ?? 'Enter your email',
                             icon: Icons.email_outlined,
                             keyboardType: TextInputType.emailAddress,
                             validator: (value) {
                               if (value == null || value.isEmpty) {
-                                return 'Please enter your email';
+                                return localizations?.translate('please_enter_email') ?? 'Please enter your email';
                               }
                               if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
-                                return 'Please enter a valid email';
+                                return localizations?.translate('please_enter_valid_email') ?? 'Please enter a valid email';
                               }
                               return null;
                             },
@@ -473,13 +478,13 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                           _ModernTextField(
                             controller: _phoneController,
                             focusNode: _phoneFocusNode,
-                            label: 'Phone Number',
-                            hint: 'Enter your phone number',
+                            label: localizations?.translate('phone_number') ?? 'Phone Number',
+                            hint: localizations?.translate('enter_your_phone_number') ?? 'Enter your phone number',
                             icon: Icons.phone_outlined,
                             keyboardType: TextInputType.phone,
                             validator: (value) {
                               if (value == null || value.isEmpty) {
-                                return 'Please enter your phone number';
+                                return localizations?.translate('please_enter_phone_number') ?? 'Please enter your phone number';
                               }
                               return null;
                             },
@@ -492,8 +497,8 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                           _ModernTextField(
                             controller: _passwordController,
                             focusNode: _passwordFocusNode,
-                            label: 'Password',
-                            hint: 'Enter your password',
+                            label: localizations?.translate('password') ?? 'Password',
+                            hint: localizations?.translate('enter_your_password') ?? 'Enter your password',
                             icon: Icons.lock_outline,
                             obscureText: _obscurePassword,
                             suffixIcon: IconButton(
@@ -506,10 +511,10 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                             ),
                             validator: (value) {
                               if (value == null || value.isEmpty) {
-                                return 'Please enter your password';
+                                return localizations?.translate('please_enter_password') ?? 'Please enter your password';
                               }
                               if (value.length < 6) {
-                                return 'Password must be at least 6 characters';
+                                return localizations?.translate('password_min_length') ?? 'Password must be at least 6 characters';
                               }
                               return null;
                             },
@@ -537,14 +542,14 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                                   text: TextSpan(
                                     style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 14),
                                     children: [
-                                      const TextSpan(text: 'I agree to the '),
+                                      TextSpan(text: '${localizations?.translate('i_agree_to') ?? 'I agree to the'} '),
                                       TextSpan(
-                                        text: 'Terms & Conditions',
+                                        text: localizations?.translate('terms_conditions') ?? 'Terms & Conditions',
                                         style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600),
                                       ),
-                                      const TextSpan(text: ' and '),
+                                      TextSpan(text: ' ${localizations?.translate('and') ?? 'and'} '),
                                       TextSpan(
-                                        text: 'Privacy Policy',
+                                        text: localizations?.translate('privacy_policy') ?? 'Privacy Policy',
                                         style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600),
                                       ),
                                     ],
@@ -557,7 +562,7 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                           const SizedBox(height: 40),
 
                           // Signup Button
-                          _ModernButton(text: 'Create Account', onPressed: _isLoading ? null : _signup, isLoading: _isLoading, isDark: isDark),
+                          _ModernButton(text: localizations?.translate('create_account') ?? 'Create Account', onPressed: _isLoading ? null : _signup, isLoading: _isLoading, isDark: isDark),
 
                           const SizedBox(height: 30),
 
@@ -565,11 +570,11 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Text('Already have an account? ', style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 16)),
+                              Text('${localizations?.translate('already_have_account') ?? 'Already have an account?'} ', style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 16)),
                               TextButton(
                                 onPressed: _goToLogin,
                                 child: Text(
-                                  'Sign In',
+                                  localizations?.translate('sign_in') ?? 'Sign In',
                                   style: TextStyle(color: AppColors.primary, fontSize: 16, fontWeight: FontWeight.bold),
                                 ),
                               ),
@@ -645,8 +650,9 @@ class _RoleSelectionCard extends StatelessWidget {
   final String selectedRole;
   final ValueChanged<String> onRoleChanged;
   final bool isDark;
+  final AppLocalizations? localizations;
 
-  const _RoleSelectionCard({required this.selectedRole, required this.onRoleChanged, required this.isDark});
+  const _RoleSelectionCard({required this.selectedRole, required this.onRoleChanged, required this.isDark, this.localizations});
 
   @override
   Widget build(BuildContext context) {
@@ -654,7 +660,7 @@ class _RoleSelectionCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'I want to join as',
+          localizations?.translate('i_want_to_join_as') ?? 'I want to join as',
           style: TextStyle(color: AppColors.getTextPrimaryColor(isDark), fontSize: 16, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 12),
@@ -665,12 +671,12 @@ class _RoleSelectionCard extends StatelessWidget {
               children: [
                 Flexible(
                   flex: 1,
-                  child: _RoleOption(title: 'Passenger', subtitle: 'Book rides', icon: Icons.person, isSelected: selectedRole == 'passenger', onTap: () => onRoleChanged('passenger'), isDark: isDark),
+                  child: _RoleOption(title: localizations?.translate('passenger') ?? 'Passenger', subtitle: localizations?.translate('book_rides') ?? 'Book rides', icon: Icons.person, isSelected: selectedRole == 'passenger', onTap: () => onRoleChanged('passenger'), isDark: isDark),
                 ),
                 const SizedBox(width: 12),
                 Flexible(
                   flex: 1,
-                  child: _RoleOption(title: 'Driver', subtitle: 'Provide rides', icon: Icons.local_taxi, isSelected: selectedRole == 'driver', onTap: () => onRoleChanged('driver'), isDark: isDark),
+                  child: _RoleOption(title: localizations?.translate('driver') ?? 'Driver', subtitle: localizations?.translate('provide_rides') ?? 'Provide rides', icon: Icons.local_taxi, isSelected: selectedRole == 'driver', onTap: () => onRoleChanged('driver'), isDark: isDark),
                 ),
               ],
             ),
@@ -679,12 +685,12 @@ class _RoleSelectionCard extends StatelessWidget {
               children: [
                 Flexible(
                   flex: 1,
-                  child: _RoleOption(title: 'Driver (No Car)', subtitle: 'Find vehicle offers', icon: Icons.directions_car_outlined, isSelected: selectedRole == 'driver_no_car', onTap: () => onRoleChanged('driver_no_car'), isDark: isDark),
+                  child: _RoleOption(title: localizations?.translate('driver_no_car') ?? 'Driver (No Car)', subtitle: localizations?.translate('find_vehicle_offers') ?? 'Find vehicle offers', icon: Icons.directions_car_outlined, isSelected: selectedRole == 'driver_no_car', onTap: () => onRoleChanged('driver_no_car'), isDark: isDark),
                 ),
                 const SizedBox(width: 12),
                 Flexible(
                   flex: 1,
-                  child: _RoleOption(title: 'Car Owner', subtitle: 'Offer your vehicle', icon: Icons.car_rental, isSelected: selectedRole == 'car_owner', onTap: () => onRoleChanged('car_owner'), isDark: isDark),
+                  child: _RoleOption(title: localizations?.translate('car_owner') ?? 'Car Owner', subtitle: localizations?.translate('offer_your_vehicle') ?? 'Offer your vehicle', icon: Icons.car_rental, isSelected: selectedRole == 'car_owner', onTap: () => onRoleChanged('car_owner'), isDark: isDark),
                 ),
               ],
             ),

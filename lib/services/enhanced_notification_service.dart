@@ -218,4 +218,61 @@ class EnhancedNotificationService {
       rethrow;
     }
   }
+
+  // Send FCM push notification to a user
+  Future<void> sendFCMPushNotification({
+    required String userId,
+    required String title,
+    required String body,
+    Map<String, dynamic>? data,
+    String? imageUrl,
+  }) async {
+    try {
+      // Get user's FCM token
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      final fcmToken = userDoc.data()?['fcmToken'] as String?;
+      
+      if (fcmToken == null || fcmToken.isEmpty) {
+        print('⚠️ No FCM token found for user $userId');
+        return;
+      }
+
+      // Note: Actual FCM sending should be done from backend/cloud functions
+      // This is a placeholder for the client-side notification creation
+      // The backend should handle the actual FCM API call
+      
+      // Create notification in Firestore for in-app display
+      await createNotification(
+        userId: userId,
+        title: title,
+        body: body,
+        category: NotificationCategory.ride,
+        priority: NotificationPriority.high,
+        actionData: data,
+        imageUrl: imageUrl,
+      );
+      
+      print('✅ FCM notification queued for user $userId');
+    } catch (e) {
+      print('Error sending FCM notification: $e');
+      rethrow;
+    }
+  }
+
+  // Setup foreground message handler
+  void setupForegroundMessageHandler() {
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print('📨 Foreground message received: ${message.notification?.title}');
+      
+      // Show local notification when app is in foreground
+      // This would typically use flutter_local_notifications package
+      // For now, we'll just log it
+    });
+  }
+
+  // Setup background message handler (must be top-level function)
+  static Future<void> backgroundMessageHandler(RemoteMessage message) async {
+    print('📨 Background message received: ${message.notification?.title}');
+    // Handle background notification
+  }
 }

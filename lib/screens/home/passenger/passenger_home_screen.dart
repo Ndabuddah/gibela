@@ -19,6 +19,7 @@ import '../../../widgets/common/modern_alert_dialog.dart';
 import '../../../widgets/common/modern_drawer.dart';
 import '../../../widgets/scheduled_reminder_dialog.dart';
 import '../../../widgets/floating_countdown_widget.dart';
+import '../../../l10n/app_localizations.dart';
 import '../../scheduled_booking_details_screen.dart';
 import 'profilescreen.dart';
 import 'request_ride_screen.dart';
@@ -72,9 +73,15 @@ class _PassengerHomeScreenState extends State<PassengerHomeScreen> with TickerPr
 
     if (isFirstTime) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        final localizations = AppLocalizations.of(context);
         showDialog(
           context: context,
-          builder: (context) => const ModernAlertDialog(title: 'Welcome!', message: 'Ready for your next journey?', confirmText: 'Let\'s Go!', icon: Icons.celebration_rounded),
+          builder: (context) => ModernAlertDialog(
+            title: localizations?.translate('welcome_message') ?? 'Welcome!',
+            message: localizations?.translate('ready_journey') ?? 'Ready for your next journey?',
+            confirmText: localizations?.translate('lets_go') ?? 'Let\'s Go!',
+            icon: Icons.celebration_rounded,
+          ),
         );
         prefs.setBool('isFirstTime', false);
       });
@@ -99,13 +106,15 @@ class _PassengerHomeScreenState extends State<PassengerHomeScreen> with TickerPr
   }
 
   Future<void> _getCurrentLocation() async {
-    if (mounted) setState(() => _isLoading = true);
+      final localizations = AppLocalizations.of(context);
+      if (mounted) setState(() => _isLoading = true);
     try {
       final loc = Provider.of<LocationService>(context, listen: false);
       final pos = await loc.requestAndGetCurrentLocation(context);
       if (pos != null) {
         final addr = await loc.getAddressFromCoordinates(pos.latitude, pos.longitude);
-        if (mounted) setState(() { _currentAddress = addr ?? 'Location available'; _isLoading = false; });
+        final localizations = AppLocalizations.of(context);
+      if (mounted) setState(() { _currentAddress = addr ?? (localizations?.translate('location_available') ?? 'Location available'); _isLoading = false; });
       } else {
         if (mounted) setState(() => _isLoading = false);
       }
@@ -135,6 +144,7 @@ class _PassengerHomeScreenState extends State<PassengerHomeScreen> with TickerPr
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final user = Provider.of<AuthService>(context).userModel;
+    final localizations = AppLocalizations.of(context);
 
     return Scaffold(
       key: _scaffoldKey,
@@ -186,8 +196,8 @@ class _PassengerHomeScreenState extends State<PassengerHomeScreen> with TickerPr
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text('Hello,', style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 12)),
-              Text(user?.fullName ?? 'User', style: TextStyle(color: AppColors.getTextPrimaryColor(isDark), fontWeight: FontWeight.w900, fontSize: 16)),
+              Text(localizations?.translate('hello') ?? 'Hello,', style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 12)),
+              Text(user?.fullName ?? (localizations?.translate('user') ?? 'User'), style: TextStyle(color: AppColors.getTextPrimaryColor(isDark), fontWeight: FontWeight.w900, fontSize: 16)),
             ],
           ),
           const SizedBox(width: 12),
@@ -221,7 +231,7 @@ class _PassengerHomeScreenState extends State<PassengerHomeScreen> with TickerPr
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Where to?', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+          Text(localizations?.translate('where_to') ?? 'Where to?', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
           const SizedBox(height: 20),
           GestureDetector(
             onTap: _requestRide,
@@ -232,13 +242,13 @@ class _PassengerHomeScreenState extends State<PassengerHomeScreen> with TickerPr
                 children: [
                   const Icon(Icons.search_rounded, color: Colors.grey),
                   const SizedBox(width: 12),
-                  const Text('Enter destination', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w500)),
+                  Text(localizations?.translate('enter_destination') ?? 'Enter destination', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500)),
                   const Spacer(),
                   Container(width: 1, height: 24, color: Colors.grey.withOpacity(0.3)),
                   const SizedBox(width: 12),
                   const Icon(Icons.access_time_rounded, color: Colors.grey, size: 20),
                   const SizedBox(width: 4),
-                  const Text('Now', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text(localizations?.translate('now') ?? 'Now', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                 ],
               ),
             ),
@@ -258,22 +268,24 @@ class _PassengerHomeScreenState extends State<PassengerHomeScreen> with TickerPr
   }
 
   Widget _buildQuickActions(bool isDark) {
+    final localizations = AppLocalizations.of(context);
     return Row(
       children: [
-        Expanded(child: _ActionTile(title: 'History', icon: Icons.history_rounded, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ComprehensiveRideHistoryScreen(isDriver: false))), isDark: isDark)),
+        Expanded(child: _ActionTile(title: localizations?.translate('history') ?? 'History', icon: Icons.history_rounded, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ComprehensiveRideHistoryScreen(isDriver: false))), isDark: isDark)),
         const SizedBox(width: 12),
-        Expanded(child: _ActionTile(title: 'Scheduled', icon: Icons.calendar_today_rounded, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ScheduledTripScreen())), isDark: isDark)),
+        Expanded(child: _ActionTile(title: localizations?.translate('scheduled') ?? 'Scheduled', icon: Icons.calendar_today_rounded, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ScheduledTripScreen())), isDark: isDark)),
         const SizedBox(width: 12),
-        Expanded(child: _ActionTile(title: 'Saved', icon: Icons.bookmark_rounded, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SavedPlacesScreen())), isDark: isDark)),
+        Expanded(child: _ActionTile(title: localizations?.translate('saved_places') ?? 'Saved', icon: Icons.bookmark_rounded, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SavedPlacesScreen())), isDark: isDark)),
       ],
     );
   }
 
   Widget _buildRecentRides(bool isDark) {
+    final localizations = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Recent activity', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+        Text(localizations?.translate('recent_rides') ?? 'Recent activity', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
         const SizedBox(height: 16),
         Container(
           width: double.infinity,
@@ -283,7 +295,7 @@ class _PassengerHomeScreenState extends State<PassengerHomeScreen> with TickerPr
             children: [
               Icon(Icons.history_rounded, color: Colors.grey.withOpacity(0.5), size: 40),
               const SizedBox(height: 12),
-              const Text('No recent trips yet', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w600)),
+              Text(localizations?.translate('no_rides') ?? 'No recent trips yet', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w600)),
             ],
           ),
         ),
@@ -305,9 +317,16 @@ class _PassengerHomeScreenState extends State<PassengerHomeScreen> with TickerPr
   }
 
   Future<void> _handleLogout(BuildContext context) async {
+    final localizations = AppLocalizations.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => const ModernAlertDialog(title: 'Logout', message: 'Are you sure?', confirmText: 'Logout', cancelText: 'Cancel', isDestructive: true),
+      builder: (context) => ModernAlertDialog(
+        title: localizations?.translate('logout') ?? 'Logout',
+        message: localizations?.translate('are_you_sure') ?? 'Are you sure?',
+        confirmText: localizations?.translate('logout') ?? 'Logout',
+        cancelText: localizations?.translate('cancel') ?? 'Cancel',
+        isDestructive: true,
+      ),
     );
     if (confirmed == true) {
       final auth = Provider.of<AuthService>(context, listen: false);

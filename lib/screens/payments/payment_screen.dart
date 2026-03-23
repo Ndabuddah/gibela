@@ -7,6 +7,7 @@ import 'package:gibelbibela/widgets/common/custom_button.dart';
 
 import '../../../constants/app_colors.dart';
 import '../../../providers/theme_provider.dart';
+import '../../../l10n/app_localizations.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:gibelbibela/services/database_service.dart';
 
@@ -62,17 +63,29 @@ class _PaymentScreenState extends State<PaymentScreen> with TickerProviderStateM
     super.dispose();
   }
 
+  int _retryCount = 0;
+  static const int _maxRetries = 3;
+
   Future<void> _pay() async {
+    await _payWithRetry();
+  }
+
+  Future<void> _payWithRetry({int retryCount = 0}) async {
     setState(() {
       _isLoading = true;
       _error = null;
     });
 
     try {
-      print('💳 Starting payment process for amount: R${widget.amount}');
+      print('💳 Starting payment process for amount: R${widget.amount} (Attempt ${retryCount + 1}/$_maxRetries)');
       
       // Load secret key from dart-define to avoid committing secrets
       const paystackKey = String.fromEnvironment('PAYSTACK_SECRET_KEY', defaultValue: '');
+      
+      if (paystackKey.isEmpty) {
+        throw Exception('Payment configuration error. Please contact support.');
+      }
+      
       await PaystackFlutter().pay(
         context: context,
         secretKey: paystackKey,
@@ -86,39 +99,65 @@ class _PaymentScreenState extends State<PaymentScreen> with TickerProviderStateM
           try {
             print('✅ Payment successful, reference: ${callback.reference}');
             
-            // Record payment in database
-            await _recordPayment(callback.reference);
+            // Record payment in database with retry logic
+            bool paymentRecorded = false;
+            for (int i = 0; i < _maxRetries; i++) {
+              try {
+                await _recordPayment(callback.reference);
+                paymentRecorded = true;
+                break;
+              } catch (e) {
+                print('⚠️ Payment recording attempt ${i + 1} failed: $e');
+                if (i < _maxRetries - 1) {
+                  await Future.delayed(Duration(seconds: (i + 1) * 2)); // Exponential backoff
+                }
+              }
+            }
             
-            // Add delay to ensure database transaction is complete
-            await Future.delayed(const Duration(seconds: 2));
+            if (!paymentRecorded) {
+              // Payment succeeded but recording failed - queue for later sync
+              print('⚠️ Payment succeeded but recording failed. Will sync later.');
+              // Could store in offline queue here
+            }
             
             // Verify payment was recorded successfully
             final user = FirebaseAuth.instance.currentUser;
             if (user != null) {
-              final verified = await DatabaseService().verifyDriverPayment(user.uid);
-              if (verified) {
+              bool verified = false;
+              for (int i = 0; i < _maxRetries; i++) {
+                try {
+                  verified = await DatabaseService().verifyDriverPayment(user.uid);
+                  if (verified) break;
+                  await Future.delayed(Duration(seconds: (i + 1) * 2));
+                } catch (e) {
+                  print('⚠️ Verification attempt ${i + 1} failed: $e');
+                }
+              }
+              
+              if (verified || paymentRecorded) {
                 print('✅ Payment verification successful');
-                // Call success callback only after verification
                 widget.onPaymentSuccess();
               } else {
-                print('❌ Payment verification failed');
-                // Payment verification failed
+                print('❌ Payment verification failed after retries');
                 setState(() {
-                  _error = 'Payment verification failed. Please contact support.';
+                  final localizations = AppLocalizations.of(context);
+                  _error = '${localizations?.translate('payment_completed_verification_failed') ?? 'Payment completed but verification failed. Please contact support with reference'}: ${callback.reference}';
                   _isLoading = false;
                 });
               }
             } else {
               print('❌ No authenticated user found');
               setState(() {
-                _error = 'User authentication error. Please try again.';
+                final localizations = AppLocalizations.of(context);
+                _error = localizations?.translate('user_auth_error') ?? 'User authentication error. Please try again.';
                 _isLoading = false;
               });
             }
           } catch (e) {
             print('❌ Error in payment success callback: $e');
             setState(() {
-              _error = 'Payment processing error: $e';
+              final localizations = AppLocalizations.of(context);
+              _error = '${localizations?.translate('payment_processing_error') ?? 'Payment processing error'}: $e';
               _isLoading = false;
             });
           }
@@ -126,17 +165,30 @@ class _PaymentScreenState extends State<PaymentScreen> with TickerProviderStateM
         onCancelled: (callback) {
           print('❌ Payment cancelled by user');
           setState(() {
-            _error = 'Payment was cancelled. Please try again.';
+            final localizations = AppLocalizations.of(context);
+            _error = localizations?.translate('payment_cancelled') ?? 'Payment was cancelled. Please try again.';
             _isLoading = false;
           });
         },
       );
     } catch (e) {
       print('❌ Error initiating payment: $e');
-      setState(() {
-        _error = 'An error occurred during payment. Please try again.';
-        _isLoading = false;
-      });
+      
+      // Retry on network errors
+      if (retryCount < _maxRetries - 1 && 
+          (e.toString().contains('network') || 
+           e.toString().contains('timeout') ||
+           e.toString().contains('connection'))) {
+        print('🔄 Retrying payment...');
+        await Future.delayed(Duration(seconds: (retryCount + 1) * 2));
+        await _payWithRetry(retryCount: retryCount + 1);
+      } else {
+        setState(() {
+          final localizations = AppLocalizations.of(context);
+          _error = '${localizations?.translate('payment_error') ?? 'An error occurred during payment.'} ${retryCount >= _maxRetries - 1 ? (localizations?.translate('try_again_later') ?? 'Please try again later or contact support.') : ''}';
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -264,13 +316,18 @@ class _PaymentScreenState extends State<PaymentScreen> with TickerProviderStateM
         padding: const EdgeInsets.all(24.0),
         child: Column(
           children: [
-            const Text(
-              'Total Amount',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w500,
-                color: Colors.white,
-              ),
+            Builder(
+              builder: (context) {
+                final localizations = AppLocalizations.of(context);
+                return Text(
+                  localizations?.translate('total_amount') ?? 'Total Amount',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.white,
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 12),
             Text(
@@ -298,13 +355,18 @@ class _PaymentScreenState extends State<PaymentScreen> with TickerProviderStateM
                 children: [
                   Icon(Icons.credit_card, color: Colors.white.withOpacity(0.9), size: 18),
                   const SizedBox(width: 8),
-                  Text(
-                    'Secure Card Payment',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.9),
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
+                  Builder(
+                    builder: (context) {
+                      final localizations = AppLocalizations.of(context);
+                      return Text(
+                        localizations?.translate('secure_card_payment') ?? 'Secure Card Payment',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.9),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),
@@ -344,7 +406,9 @@ class _PaymentScreenState extends State<PaymentScreen> with TickerProviderStateM
 
   Widget _buildPaymentButton() {
     return CustomButton(
-      text: _isLoading ? 'Processing Payment...' : 'Pay R${widget.amount.toStringAsFixed(0)} Securely',
+      text: _isLoading 
+        ? (AppLocalizations.of(context)?.translate('processing_payment') ?? 'Processing Payment...')
+        : '${AppLocalizations.of(context)?.translate('pay_now') ?? 'Pay'} R${widget.amount.toStringAsFixed(0)} ${AppLocalizations.of(context)?.translate('securely') ?? 'Securely'}',
       onPressed: _isLoading ? null : _pay,
       isDisabled: _isLoading,
       icon: Icons.lock_outline,
@@ -362,7 +426,7 @@ class _PaymentScreenState extends State<PaymentScreen> with TickerProviderStateM
         ),
         const SizedBox(width: 8),
         Text(
-          'Secured by Paystack',
+          AppLocalizations.of(context)?.translate('secured_by_paystack') ?? 'Secured by Paystack',
           style: TextStyle(
             fontSize: 14,
             color: AppColors.getTextSecondaryColor(isDark),

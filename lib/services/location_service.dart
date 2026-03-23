@@ -19,23 +19,58 @@ class LocationService extends ChangeNotifier {
 
   Position? get currentPosition => _currentPosition;
 
-  Future<Position?> _getCurrentLocation() async {
+  int _locationRetryCount = 0;
+  static const int _maxLocationRetries = 3;
+
+  Future<Position?> _getCurrentLocation({int retryCount = 0}) async {
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) return null;
+      if (!serviceEnabled) {
+        if (retryCount < _maxLocationRetries) {
+          await Future.delayed(Duration(seconds: (retryCount + 1) * 2));
+          return _getCurrentLocation(retryCount: retryCount + 1);
+        }
+        return null;
+      }
 
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) return null;
+        if (permission == LocationPermission.denied) {
+          if (retryCount < _maxLocationRetries) {
+            await Future.delayed(Duration(seconds: (retryCount + 1) * 2));
+            return _getCurrentLocation(retryCount: retryCount + 1);
+          }
+          return null;
+        }
       }
 
       if (permission == LocationPermission.deniedForever) return null;
 
-      _currentPosition = await Geolocator.getCurrentPosition();
+      // Use high accuracy for better results
+      _currentPosition = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 10),
+      );
+      
+      // Validate location accuracy
+      if (_currentPosition != null && _currentPosition!.accuracy > 100) {
+        // Accuracy is poor, try again if we have retries left
+        if (retryCount < _maxLocationRetries) {
+          await Future.delayed(Duration(seconds: (retryCount + 1) * 2));
+          return _getCurrentLocation(retryCount: retryCount + 1);
+        }
+      }
+      
       notifyListeners();
+      _locationRetryCount = 0; // Reset on success
       return _currentPosition;
     } catch (e) {
+      print('Location error (attempt ${retryCount + 1}): $e');
+      if (retryCount < _maxLocationRetries) {
+        await Future.delayed(Duration(seconds: (retryCount + 1) * 2));
+        return _getCurrentLocation(retryCount: retryCount + 1);
+      }
       return null;
     }
   }

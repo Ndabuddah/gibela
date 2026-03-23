@@ -33,6 +33,7 @@ import '../../../services/location_service.dart';
 import '../../../widgets/common/custom_button.dart';
 import '../../../widgets/common/modern_alert_dialog.dart';
 import '../../../widgets/common/modern_drawer.dart';
+import '../../../l10n/app_localizations.dart';
 import '../../auth/driver_signup_screen.dart';
 import '../../auth/email_verification_screen.dart';
 import '../../notifications/notification_screen.dart';
@@ -55,7 +56,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
 
   bool _isLoading = false;
   bool _isOnline = false;
-  String _currentAddress = 'Getting location...';
+  String _currentAddress = '';
   UserModel? _currentUser;
   double? _currentLat;
   double? _currentLng;
@@ -195,7 +196,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
         if (mounted) {
           setState(() {
             _currentLat = pos.latitude; _currentLng = pos.longitude;
-            _currentAddress = addr ?? 'Location available';
+            final localizations = AppLocalizations.of(context);
+            _currentAddress = addr ?? (localizations?.translate('location_available') ?? 'Location available');
             _isLoading = false;
           });
         }
@@ -211,8 +213,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
     final auth = Provider.of<AuthService>(context, listen: false);
     if (auth.userModel == null) return;
 
+    final localizations = AppLocalizations.of(context);
     if (!auth.userModel!.isApproved) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Account must be approved to go online.')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(localizations?.translate('account_must_be_approved') ?? 'Account must be approved to go online.')));
       return;
     }
 
@@ -231,8 +234,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
       if (newStatus) _startLocationUpdatesWhenOnline();
       else _locationUpdateTimer?.cancel();
 
+      final localizations = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(newStatus ? 'You are now Online' : 'You are now Offline'),
+        content: Text(newStatus ? (localizations?.translate('you_are_now_online') ?? 'You are now Online') : (localizations?.translate('you_are_now_offline') ?? 'You are now Offline')),
         backgroundColor: newStatus ? AppColors.success : AppColors.uberBlack,
         behavior: SnackBarBehavior.floating,
       ));
@@ -253,6 +257,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
   }
 
   void _showApprovalPendingDialog() {
+    final localizations = AppLocalizations.of(context);
     showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -268,11 +273,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
                 child: const Icon(Icons.hourglass_top_rounded, color: AppColors.primary, size: 48),
               ),
               const SizedBox(height: 24),
-              const Text('Account Under Review', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+              Text(localizations?.translate('account_under_review') ?? 'Account Under Review', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
               const SizedBox(height: 12),
-              const Text('Our team is currently reviewing your application. You\'ll be notified once you\'re cleared to drive.', style: TextStyle(color: Colors.grey), textAlign: TextAlign.center),
+              Text(localizations?.translate('account_review_message') ?? 'Our team is currently reviewing your application. You\'ll be notified once you\'re cleared to drive.', style: const TextStyle(color: Colors.grey), textAlign: TextAlign.center),
               const SizedBox(height: 32),
-              CustomButton(text: 'Understood', onPressed: () => Navigator.pop(context), isFullWidth: true),
+              CustomButton(text: localizations?.translate('understood') ?? 'Understood', onPressed: () => Navigator.pop(context), isFullWidth: true),
             ],
           ),
         ),
@@ -339,6 +344,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final user = Provider.of<AuthService>(context).userModel;
+    final localizations = AppLocalizations.of(context);
+    if (_currentAddress.isEmpty) {
+      _currentAddress = localizations?.translate('getting_location') ?? 'Getting location...';
+    }
 
     if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator(color: AppColors.uberBlack)));
 
@@ -460,12 +469,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
   }
 
   Widget _buildWelcomeSection(bool isDark, UserModel? user) {
+    final localizations = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Welcome,', style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 16, fontWeight: FontWeight.w500)),
+        Text(localizations?.translate('welcome') ?? 'Welcome,', style: TextStyle(color: AppColors.getTextSecondaryColor(isDark), fontSize: 16, fontWeight: FontWeight.w500)),
         const SizedBox(height: 4),
-        Text(user?.name ?? 'Driver', style: TextStyle(color: AppColors.getTextPrimaryColor(isDark), fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+        Text(user?.name ?? (localizations?.translate('driver') ?? 'Driver'), style: TextStyle(color: AppColors.getTextPrimaryColor(isDark), fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
       ],
     );
   }
@@ -484,7 +494,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
         children: [
           const Icon(Icons.info_outline_rounded, color: AppColors.primaryDark),
           const SizedBox(width: 12),
-          const Expanded(child: Text('Your account is under review. Some features may be restricted.', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+          Expanded(child: Text(AppLocalizations.of(context)?.translate('account_review_banner') ?? 'Your account is under review. Some features may be restricted.', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
         ],
       ),
     );
@@ -517,10 +527,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(_isOnline ? "You're Online" : "You're Offline", 
+                  Text(_isOnline ? (AppLocalizations.of(context)?.translate('you_are_online') ?? "You're Online") : (AppLocalizations.of(context)?.translate('you_are_offline') ?? "You're Offline"), 
                     style: TextStyle(color: textColor, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
                   const SizedBox(height: 4),
-                  Text(_isOnline ? "Ready for ride requests" : "Go online to start earning", 
+                  Text(_isOnline ? (AppLocalizations.of(context)?.translate('ready_for_requests') ?? "Ready for ride requests") : (AppLocalizations.of(context)?.translate('go_online_to_earn') ?? "Go online to start earning"), 
                     style: TextStyle(color: _isOnline ? Colors.white70 : AppColors.getTextSecondaryColor(isDark), fontSize: 14)),
                 ],
               ),
@@ -576,13 +586,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("Today's Earnings", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.grey)),
+              Text(AppLocalizations.of(context)?.translate('today_earnings') ?? "Today's Earnings", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.grey)),
               GestureDetector(
                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EarningsScreen())),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
-                  child: const Text('Details', style: TextStyle(color: AppColors.primaryDark, fontWeight: FontWeight.bold, fontSize: 12)),
+                  child: Text(AppLocalizations.of(context)?.translate('details') ?? 'Details', style: const TextStyle(color: AppColors.primaryDark, fontWeight: FontWeight.bold, fontSize: 12)),
                 ),
               ),
             ],
@@ -597,7 +607,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
                   const SizedBox(width: 12),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 6),
-                    child: Text('$ridesCompleted Rides', style: const TextStyle(color: AppColors.success, fontWeight: FontWeight.bold, fontSize: 14)),
+                    child: Text('$ridesCompleted ${AppLocalizations.of(context)?.translate('rides') ?? 'Rides'}', style: const TextStyle(color: AppColors.success, fontWeight: FontWeight.bold, fontSize: 14)),
                   ),
                 ],
               ),
@@ -610,17 +620,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Quick Actions', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+        Text(AppLocalizations.of(context)?.translate('quick_actions') ?? 'Quick Actions', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
         const SizedBox(height: 16),
         Row(
           children: [
-            Expanded(child: _ActionTile(title: 'Requests', icon: Icons.explore_rounded, color: AppColors.uberBlack, onTap: _viewRideRequests, isDark: isDark)),
+            Expanded(child: _ActionTile(title: AppLocalizations.of(context)?.translate('requests') ?? 'Requests', icon: Icons.explore_rounded, color: AppColors.uberBlack, onTap: _viewRideRequests, isDark: isDark)),
             const SizedBox(width: 12),
-            Expanded(child: _ActionTile(title: 'Scheduled', icon: Icons.calendar_today_rounded, color: AppColors.uberBlack, onTap: () {
+            Expanded(child: _ActionTile(title: AppLocalizations.of(context)?.translate('scheduled') ?? 'Scheduled', icon: Icons.calendar_today_rounded, color: AppColors.uberBlack, onTap: () {
               Navigator.push(context, MaterialPageRoute(builder: (_) => ScheduledRequestsSection(isDark: isDark)));
             }, isDark: isDark)),
             const SizedBox(width: 12),
-            Expanded(child: _ActionTile(title: 'History', icon: Icons.history_rounded, color: AppColors.uberBlack, onTap: () {
+            Expanded(child: _ActionTile(title: AppLocalizations.of(context)?.translate('history') ?? 'History', icon: Icons.history_rounded, color: AppColors.uberBlack, onTap: () {
               Navigator.push(context, MaterialPageRoute(builder: (_) => const ComprehensiveRideHistoryScreen(isDriver: true)));
             }, isDark: isDark)),
           ],
@@ -633,7 +643,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Recent Activity', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+        Text(AppLocalizations.of(context)?.translate('recent_activity') ?? 'Recent Activity', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
         const SizedBox(height: 16),
         _recentRides.isEmpty 
           ? _buildEmptyState(isDark)
@@ -688,7 +698,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
         children: [
           Icon(Icons.history_rounded, color: Colors.grey.withOpacity(0.5), size: 40),
           const SizedBox(height: 12),
-          const Text('No recent trips yet', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w600)),
+          Text(AppLocalizations.of(context)?.translate('no_rides') ?? 'No recent trips yet', style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -697,7 +707,16 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with TickerProvider
   Future<void> _handleLogout(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => const ModernAlertDialog(title: 'Logout', message: 'Are you sure?', confirmText: 'Logout', cancelText: 'Cancel', isDestructive: true),
+      builder: (context) {
+        final localizations = AppLocalizations.of(context);
+        return ModernAlertDialog(
+          title: localizations?.translate('logout') ?? 'Logout',
+          message: localizations?.translate('are_you_sure') ?? 'Are you sure?',
+          confirmText: localizations?.translate('logout') ?? 'Logout',
+          cancelText: localizations?.translate('cancel') ?? 'Cancel',
+          isDestructive: true,
+        );
+      },
     );
     if (confirmed == true) {
       final auth = Provider.of<AuthService>(context, listen: false);

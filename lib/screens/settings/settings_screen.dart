@@ -7,6 +7,8 @@ import '../../constants/app_colors.dart';
 import '../../services/auth_service.dart';
 import '../../services/permission_service.dart';
 import '../../widgets/common/modern_alert_dialog.dart';
+import '../../providers/locale_provider.dart';
+import '../../l10n/app_localizations.dart';
 import '../auth/login_screen.dart';
 import 'terms_screen.dart';
 import 'delete_account_screen.dart';
@@ -23,10 +25,11 @@ class SettingsScreen extends StatelessWidget {
     final user = authService.userModel;
     final isAdmin = user?.email == 'ngemangemangema@gmail.com' || 
                    user?.email == 'asamberyde@gmail.com';
+    final localizations = AppLocalizations.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Settings'),
+        title: Text(localizations?.settings ?? 'Settings'),
         backgroundColor: AppColors.primary,
       ),
       body: ListView(
@@ -38,8 +41,8 @@ class SettingsScreen extends StatelessWidget {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               child: ListTile(
                 leading: const Icon(Icons.admin_panel_settings, color: Colors.purple),
-                title: const Text('Admin Dashboard', style: TextStyle(color: Colors.purple, fontWeight: FontWeight.bold)),
-                subtitle: const Text('Manage users, drivers, and system settings'),
+                title: Text(localizations?.translate('admin_dashboard') ?? 'Admin Dashboard', style: const TextStyle(color: Colors.purple, fontWeight: FontWeight.bold)),
+                subtitle: Text(localizations?.translate('manage_users_drivers') ?? 'Manage users, drivers, and system settings'),
                 onTap: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
@@ -85,17 +88,17 @@ class SettingsScreen extends StatelessWidget {
                     ),
                     child: const Icon(Icons.emergency, color: Colors.white, size: 24),
                   ),
-                  title: const Text(
-                    'Emergency Panic Settings',
-                    style: TextStyle(
+                  title: Text(
+                    localizations?.translate('emergency_panic_settings') ?? 'Emergency Panic Settings',
+                    style: const TextStyle(
                       color: Colors.red,
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
                     ),
                   ),
-                  subtitle: const Text(
-                    'Add trusted contacts for emergency alerts',
-                    style: TextStyle(color: Colors.redAccent),
+                  subtitle: Text(
+                    localizations?.translate('add_trusted_contacts') ?? 'Add trusted contacts for emergency alerts',
+                    style: const TextStyle(color: Colors.redAccent),
                   ),
                   trailing: const Icon(Icons.arrow_forward_ios, color: Colors.red),
                   onTap: () {
@@ -113,7 +116,7 @@ class SettingsScreen extends StatelessWidget {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: ListTile(
               leading: const Icon(Icons.privacy_tip, color: AppColors.primary),
-              title: const Text('Privacy Policy'),
+              title: Text(localizations?.translate('privacy_policy') ?? 'Privacy Policy'),
               onTap: () async {
                 const url = 'https://sites.google.com/view/ride-app/home';
                 if (await canLaunchUrl(Uri.parse(url))) {
@@ -131,7 +134,7 @@ class SettingsScreen extends StatelessWidget {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: ListTile(
               leading: const Icon(Icons.description, color: AppColors.primary),
-              title: const Text('Terms & Conditions'),
+              title: Text(localizations?.translate('terms_conditions') ?? 'Terms & Conditions'),
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const TermsScreen()),
@@ -144,7 +147,7 @@ class SettingsScreen extends StatelessWidget {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: ListTile(
               leading: const Icon(Icons.location_on, color: AppColors.primary),
-              title: const Text('Location Permissions'),
+              title: Text(localizations?.translate('location_permissions') ?? 'Location Permissions'),
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const PermissionSettingsScreen()),
@@ -153,11 +156,29 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
+          Consumer<LocaleProvider>(
+            builder: (context, localeProvider, child) {
+              final localizations = AppLocalizations.of(context);
+              return Card(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: ListTile(
+                  leading: const Icon(Icons.language, color: AppColors.primary),
+                  title: Text(localizations?.translate('language') ?? 'Language'),
+                  subtitle: Text(localeProvider.currentLanguageName),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: () {
+                    _showLanguageSelector(context, localeProvider);
+                  },
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 16),
           Card(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: ListTile(
               leading: const Icon(Icons.delete_forever, color: Colors.red),
-              title: const Text('Delete Account', style: TextStyle(color: Colors.red)),
+              title: Text(localizations?.translate('delete_account') ?? 'Delete Account', style: const TextStyle(color: Colors.red)),
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const DeleteAccountScreen()),
@@ -166,6 +187,60 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+  
+  void _showLanguageSelector(BuildContext context, LocaleProvider localeProvider) {
+    final localizations = AppLocalizations.of(context);
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              localizations?.translate('select_language') ?? 'Select Language',
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 20),
+            ...AppLocalizations.supportedLocales.map((locale) {
+              final isSelected = localeProvider.locale.languageCode == locale.languageCode;
+              return ListTile(
+                leading: Icon(
+                  isSelected ? Icons.check_circle : Icons.circle_outlined,
+                  color: isSelected ? AppColors.primary : Colors.grey,
+                ),
+                title: Text(
+                  localeProvider.getLanguageName(locale.languageCode),
+                  style: TextStyle(
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    color: isSelected ? AppColors.primary : null,
+                  ),
+                ),
+                onTap: () {
+                  localeProvider.setLocale(locale);
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Language changed to ${localeProvider.getLanguageName(locale.languageCode)}'),
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                },
+              );
+            }),
+            const SizedBox(height: 10),
+          ],
+        ),
       ),
     );
   }
